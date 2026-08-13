@@ -115,7 +115,9 @@ function drawWorld(): void {
   const offsetX = (width - pixelsPerCell * ARENA_WIDTH_CELLS) / 2;
   const offsetY = (height - pixelsPerCell * ARENA_HEIGHT_CELLS) / 2;
   const stage = pixiApp.stage;
-  stage.removeChildren();
+  for (const child of stage.removeChildren()) {
+    child.destroy({ children: true });
+  }
 
   const background = new Graphics();
   background.rect(0, 0, width, height).fill({ color: 0x0f0d1b });
