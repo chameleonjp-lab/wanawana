@@ -4,6 +4,7 @@ import { AppStateMachine } from './app/state.ts';
 import { cellToPixels } from './core/fixed.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, type InputCommand, type WorldState } from './core/types.ts';
+import { InputController } from './input/controller.ts';
 
 const FRAME_MS = 1_000 / 60;
 const MAX_TICKS_PER_FRAME = 5;
@@ -23,13 +24,14 @@ const cpuHp = getElement<HTMLElement>('cpu-hp');
 const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
 const resultHash = getElement<HTMLElement>('result-hash');
+const controls = getElement<HTMLElement>('controls');
 
 let pixiApp: Application | null = null;
 let world: WorldState | null = null;
 let frameId = 0;
 let lastFrameTime = 0;
 let accumulator = 0;
-const pressedKeys = new Set<string>();
+const inputController = new InputController(controls);
 
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -96,15 +98,7 @@ async function ensurePixi(): Promise<boolean> {
 }
 
 function readInput(): InputCommand {
-  const left = pressedKeys.has('ArrowLeft') || pressedKeys.has('a');
-  const right = pressedKeys.has('ArrowRight') || pressedKeys.has('d');
-  const up = pressedKeys.has('ArrowUp') || pressedKeys.has('w');
-  const down = pressedKeys.has('ArrowDown') || pressedKeys.has('s');
-  return {
-    moveX: left === right ? 0 : left ? -1 : 1,
-    moveY: up === down ? 0 : up ? -1 : 1,
-    fire: pressedKeys.has(' '),
-  };
+  return inputController.readCommand();
 }
 
 function drawWorld(): void {
@@ -195,7 +189,7 @@ function loop(timestamp: number): void {
 function pauseGame(message = '試合を停止しています。'): void {
   if (machine.state !== 'battle') return;
   cancelAnimationFrame(frameId);
-  pressedKeys.clear();
+  inputController.deactivate();
   machine.transition('paused');
   status.textContent = message;
   updateScreen();
@@ -203,7 +197,7 @@ function pauseGame(message = '試合を停止しています。'): void {
 
 function resumeGame(): void {
   if (machine.state !== 'paused') return;
-  pressedKeys.clear();
+  inputController.activate();
   machine.transition('battle');
   updateScreen();
   startLoop();
@@ -211,7 +205,7 @@ function resumeGame(): void {
 
 function finishBattle(): void {
   cancelAnimationFrame(frameId);
-  pressedKeys.clear();
+  inputController.deactivate();
   if (!world) return;
   machine.transition('result');
   resultSummary.textContent = `150秒の試合を${world.tick}tickで完了しました。次の段階で罠と敗因の表示を追加します。`;
@@ -223,6 +217,7 @@ async function startBattle(): Promise<void> {
   const ready = await ensurePixi();
   if (!ready) return;
   world = createWorld(Date.now() >>> 0);
+  inputController.activate();
   machine.transition('battle');
   updateScreen();
   updateHud();
@@ -232,7 +227,7 @@ async function startBattle(): Promise<void> {
 
 function returnToTitle(): void {
   cancelAnimationFrame(frameId);
-  pressedKeys.clear();
+  inputController.deactivate();
   world = null;
   if (machine.state === 'battle' || machine.state === 'paused' || machine.state === 'result') {
     machine.transition('title');
@@ -252,26 +247,23 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
 
-  window.addEventListener('keydown', (event) => {
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'w', 'a', 's', 'd'].includes(event.key)) {
-      event.preventDefault();
-      pressedKeys.add(event.key);
-    }
-  });
-  window.addEventListener('keyup', (event) => pressedKeys.delete(event.key));
   window.addEventListener('blur', () => {
-    pressedKeys.clear();
+    inputController.reset();
     if (machine.state === 'battle') pauseGame('画面のフォーカスを失ったため停止しました。');
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') {
-      pressedKeys.clear();
+      inputController.reset();
       if (machine.state === 'battle') pauseGame('別の画面へ移ったため停止しました。');
     }
   });
   window.addEventListener('pagehide', () => {
-    pressedKeys.clear();
+    inputController.reset();
     if (machine.state === 'battle') pauseGame('ページが隠れたため停止しました。');
+  });
+  window.addEventListener('orientationchange', () => {
+    inputController.reset();
+    if (machine.state === 'battle') pauseGame('縦向きに戻してから再開してください。');
   });
 }
 
