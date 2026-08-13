@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#161326" />
+    <title>ワナワナ — 仕掛け師の舞台</title>
+  </head>
+  <body>
+    <main id="app" aria-live="polite">
+      <header class="site-header">
+        <p class="eyebrow">ワナワナ・ショー</p>
+        <h1>ワナワナ</h1>
+        <p id="status" class="status">準備しています…</p>
+      </header>
+
+      <section id="title-view" class="screen" aria-labelledby="title-heading">
+        <h2 id="title-heading">見えない仕掛けを、先に読む。</h2>
+        <p>
+          まずは舞台の土台を確認する試作版です。現在はCPU対戦の画面遷移と、固定時間で動く人形だけを収録しています。
+        </p>
+        <button id="start-button" class="primary-button" type="button">舞台に入る</button>
+      </section>
+
+      <section id="unsupported-view" class="screen is-hidden" aria-labelledby="unsupported-heading">
+        <h2 id="unsupported-heading">この端末では舞台を表示できません</h2>
+        <p>WebGLを開始できませんでした。ブラウザを更新して、もう一度お試しください。</p>
+        <button id="retry-button" class="secondary-button" type="button">もう一度確認する</button>
+      </section>
+
+      <section id="battle-view" class="screen battle-screen is-hidden" aria-labelledby="battle-heading">
+        <div class="battle-heading-row">
+          <div>
+            <p class="eyebrow">試作ステージ 01</p>
+            <h2 id="battle-heading">大歯車劇場</h2>
+          </div>
+          <button id="pause-button" class="icon-button" type="button" aria-label="試合を一時停止">一時停止</button>
+        </div>
+        <div class="hud" aria-label="試合情報">
+          <span>残り <strong id="time-value">150.0</strong>秒</span>
+          <span>あなた <strong id="player-hp">100</strong></span>
+          <span>CPU <strong id="cpu-hp">100</strong></span>
+          <span>tick <strong id="tick-value">0</strong></span>
+        </div>
+        <div id="arena" class="arena" aria-label="闘技場"></div>
+        <p class="hint">キーボードのWASDまたは矢印キーで人形を動かします。罠と射撃は次の段階で追加します。</p>
+      </section>
+
+      <section id="pause-view" class="screen overlay-screen is-hidden" aria-labelledby="pause-heading">
+        <h2 id="pause-heading">試合を停止しました</h2>
+        <p>入力と試合時間は止まっています。準備ができたら再開してください。</p>
+        <button id="resume-button" class="primary-button" type="button">再開する</button>
+        <button id="pause-title-button" class="text-button" type="button">タイトルへ戻る</button>
+      </section>
+
+      <section id="result-view" class="screen overlay-screen is-hidden" aria-labelledby="result-heading">
+        <p class="eyebrow">設計図リザルト（試作）</p>
+        <h2 id="result-heading">試合を終えました</h2>
+        <p id="result-summary">固定tickの試合が完了しました。</p>
+        <p class="result-hash">最終状態 <code id="result-hash">—</code></p>
+        <button id="restart-button" class="primary-button" type="button">もう一度</button>
+        <button id="result-title-button" class="text-button" type="button">タイトルへ戻る</button>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
