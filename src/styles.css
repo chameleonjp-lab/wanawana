@@ -52,6 +52,7 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .battle-screen { padding: clamp(14px, 3vw, 24px); }
 .battle-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .battle-heading-row h2 { margin-bottom: 0; }
+.battle-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .hud { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0 12px; color: #f5e7c7; font-size: .82rem; }
 .hud span { padding: 6px 9px; border-radius: 999px; background: #2c2247; }
 .hud strong { color: #fff; }

@@ -1,6 +1,7 @@
 import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { AppStateMachine } from './app/state.ts';
+import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
 import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
 import { buildMatchReport, chainHeading } from './core/result.ts';
@@ -30,6 +31,7 @@ const resultDetails = getElement<HTMLElement>('result-details');
 const resultHash = getElement<HTMLElement>('result-hash');
 const trapPreview = getElement<HTMLElement>('trap-preview');
 const inspectButton = getElement<HTMLButtonElement>('inspect-button');
+const soundButton = getElement<HTMLButtonElement>('sound-button');
 const controls = getElement<HTMLElement>('controls');
 
 let pixiApp: Application | null = null;
@@ -38,6 +40,7 @@ let frameId = 0;
 let lastFrameTime = 0;
 let accumulator = 0;
 const inputController = new InputController(controls);
+const soundEngine = new SoundEngine();
 
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -57,6 +60,11 @@ function updateScreen(): void {
   setVisible(pauseView, state === 'paused');
   setVisible(resultView, state === 'result');
   status.textContent = state === 'battle' ? '固定tickで舞台を動かしています' : state === 'paused' ? '試合を停止しています' : '';
+}
+
+function updateSoundButton(): void {
+  soundButton.textContent = soundEngine.isEnabled ? '音: オン' : '音: オフ';
+  soundButton.setAttribute('aria-pressed', String(soundEngine.isEnabled));
 }
 
 function webglAvailable(): boolean {
@@ -185,6 +193,21 @@ function drawWorld(): void {
     marker.circle(eventX, eventY, Math.max(10, pixelsPerCell * (0.2 + age / 180)))
       .stroke({ color, alpha: Math.max(0.2, 1 - age / 30), width: 2 });
     stage.addChild(marker);
+    if (age <= 12) {
+      const burst = new Graphics();
+      const burstAlpha = Math.max(0.08, 0.7 - age / 18);
+      const burstRadius = pixelsPerCell * (0.28 + age / 60);
+      burst.circle(eventX, eventY, burstRadius).stroke({ color, alpha: burstAlpha, width: 2 });
+      for (let ray = 0; ray < 4; ray += 1) {
+        const angle = ray * Math.PI / 2;
+        const startRadius = burstRadius * 1.25;
+        const endRadius = burstRadius * 1.8;
+        burst.moveTo(eventX + Math.cos(angle) * startRadius, eventY + Math.sin(angle) * startRadius)
+          .lineTo(eventX + Math.cos(angle) * endRadius, eventY + Math.sin(angle) * endRadius);
+      }
+      burst.stroke({ color, alpha: burstAlpha, width: 2 });
+      stage.addChild(burst);
+    }
   }
 
   for (const player of world.players) {
@@ -279,7 +302,9 @@ function loop(timestamp: number): void {
   while (accumulator >= FRAME_MS && processed < MAX_TICKS_PER_FRAME) {
     const playerInput = readInput();
     const cpuDecision = chooseCpuDecision(world);
+    const previousWorld = world;
     world = advanceWorld(world, playerInput, cpuDecision.command);
+    soundEngine.syncWorld(previousWorld, world);
     accumulator -= FRAME_MS;
     processed += 1;
   }
@@ -297,6 +322,7 @@ function pauseGame(message = '試合を停止しています。'): void {
   if (machine.state !== 'battle') return;
   cancelAnimationFrame(frameId);
   inputController.deactivate();
+  soundEngine.suspend();
   machine.transition('paused');
   status.textContent = message;
   updateScreen();
@@ -305,6 +331,7 @@ function pauseGame(message = '試合を停止しています。'): void {
 function resumeGame(): void {
   if (machine.state !== 'paused') return;
   inputController.activate();
+  void soundEngine.resume().then(updateSoundButton);
   machine.transition('battle');
   updateScreen();
   startLoop();
@@ -383,8 +410,13 @@ function finishBattle(): void {
 }
 
 async function startBattle(): Promise<void> {
+  void soundEngine.resume().then(updateSoundButton);
   const ready = await ensurePixi();
-  if (!ready) return;
+  if (!ready) {
+    soundEngine.suspend();
+    updateSoundButton();
+    return;
+  }
   world = createWorld(Date.now() >>> 0);
   inputController.activate();
   machine.transition('battle');
@@ -397,6 +429,7 @@ async function startBattle(): Promise<void> {
 function returnToTitle(): void {
   cancelAnimationFrame(frameId);
   inputController.deactivate();
+  soundEngine.suspend();
   world = null;
   if (machine.state === 'battle' || machine.state === 'paused' || machine.state === 'result') {
     machine.transition('title');
@@ -412,6 +445,7 @@ function bindEvents(): void {
   });
   getElement<HTMLButtonElement>('pause-button').addEventListener('click', () => pauseGame());
   getElement<HTMLButtonElement>('resume-button').addEventListener('click', resumeGame);
+  soundButton.addEventListener('click', () => void soundEngine.toggle().then(updateSoundButton));
   getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', returnToTitle);
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
@@ -438,6 +472,7 @@ function bindEvents(): void {
 
 bindEvents();
 updateScreen();
+updateSoundButton();
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {
   machine.transition('unsupported');
