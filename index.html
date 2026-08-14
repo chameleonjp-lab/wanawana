@@ -17,7 +17,7 @@
       <section id="title-view" class="screen" aria-labelledby="title-heading">
         <h2 id="title-heading">見えない仕掛けを、先に読む。</h2>
         <p>
-          まずは舞台の土台を確認する試作版です。現在はCPU対戦の画面遷移と、固定時間で動く人形だけを収録しています。
+          指で移動台を動かし、射撃台を離して入力できます。現在は舞台の移動と入力中断を確認する試作版です。
         </p>
         <button id="start-button" class="primary-button" type="button">舞台に入る</button>
       </section>
@@ -43,7 +43,23 @@
           <span>tick <strong id="tick-value">0</strong></span>
         </div>
         <div id="arena" class="arena" aria-label="闘技場"></div>
-        <p class="hint">キーボードのWASDまたは矢印キーで人形を動かします。罠と射撃は次の段階で追加します。</p>
+        <div id="controls" class="controls" aria-label="操作台">
+          <div class="control-column">
+            <div class="move-pad" data-input-role="move" aria-label="移動パッド" role="application">
+              <span class="pad-dot" aria-hidden="true"></span>
+            </div>
+            <span class="control-caption">移動</span>
+          </div>
+          <button id="inspect-button" class="inspect-button" type="button" disabled>調査・解除<br /><small>次段階で追加</small></button>
+          <div class="control-column">
+            <button class="fire-pad" data-input-role="fire" type="button" aria-label="射撃。離して発射">
+              <span aria-hidden="true">射撃</span>
+              <small>離して発射</small>
+            </button>
+            <span class="control-caption">キーボード: WASD / 矢印 / Space</span>
+          </div>
+        </div>
+        <p class="hint">移動パッドは指を動かして方向を選びます。射撃は押している間に予約し、離すと1回だけ記録します。画面を離れると入力を中立へ戻して試合を停止します。</p>
       </section>
 
       <section id="pause-view" class="screen overlay-screen is-hidden" aria-labelledby="pause-heading">

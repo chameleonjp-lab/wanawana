@@ -57,6 +57,16 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .hud strong { color: #fff; }
 .arena { width: 100%; aspect-ratio: 9 / 13; min-height: 286px; overflow: hidden; border: 2px solid #8f70ad; border-radius: 18px; background: #0f0d1b; }
 .arena canvas { display: block; width: 100%; height: 100%; }
+.controls { display: grid; grid-template-columns: minmax(96px, 1fr) auto minmax(96px, 1fr); align-items: center; gap: 12px; margin-top: 14px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.control-column { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 6px; }
+.move-pad, .fire-pad { width: 96px; height: 96px; border-radius: 50%; touch-action: none; user-select: none; -webkit-user-select: none; }
+.move-pad { position: relative; border: 2px solid #d59aff; background: radial-gradient(circle, #5e467f 0 18%, #33264e 19% 48%, #211a37 49%); }
+.pad-dot { position: absolute; top: 50%; left: 50%; width: 30px; height: 30px; border: 2px solid #f7f1e7; border-radius: 50%; background: #8b68b3; transform: translate(-50%, -50%); pointer-events: none; }
+.fire-pad { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px solid #ffd37a; color: #251735; background: #ffd37a; font-weight: 800; }
+.fire-pad small, .inspect-button small { font-size: .62rem; font-weight: 600; }
+.inspect-button { min-width: 96px; min-height: 56px; border: 1px solid #725f97; border-radius: 14px; color: #c0b5d1; background: #2b2246; font-weight: 700; }
+.inspect-button:disabled { cursor: not-allowed; opacity: .78; }
+.control-caption { max-width: 132px; min-height: 2.4em; color: #cfc3df; font-size: .64rem; line-height: 1.2; text-align: center; }
 .hint { margin: 14px 0 0; font-size: .82rem; }
 .overlay-screen { text-align: center; }
 .result-hash { overflow-wrap: anywhere; font-size: .8rem; }
@@ -67,6 +77,8 @@ code { color: #ffd37a; }
   .site-header { padding-top: 6px; }
   .screen { border-radius: 18px; padding: 18px 14px; }
   .arena { min-height: 250px; }
+  .controls { gap: 6px; }
+  .control-caption { font-size: .58rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
