@@ -32,6 +32,15 @@ export const INVESTIGATE_TICKS = 39;
 export const DISARM_TICKS = 54;
 export const INVESTIGATE_RADIUS_UNITS = Math.trunc(1.6 * CELL_UNITS);
 export const DISARM_RADIUS_UNITS = Math.trunc(0.8 * CELL_UNITS);
+export const BOUNCE_PUSH_UNITS = Math.trunc(2.25 * CELL_UNITS);
+export const SHOCK_RADIUS_UNITS = Math.trunc(0.55 * CELL_UNITS);
+export const SHOCK_PUSH_UNITS = Math.trunc(0.6 * CELL_UNITS);
+export const HATCH_RADIUS_UNITS = Math.trunc(0.45 * CELL_UNITS);
+export const HATCH_DISABLED_TICKS = 48;
+export const RESPAWN_INVULNERABLE_TICKS = 30;
+export const MAX_CHAIN_TRAPS = 8;
+export const MAX_EVENTS_PER_TICK = 128;
+export const MAX_EVENT_LOG = 50_000;
 
 export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
   bounce: 1,

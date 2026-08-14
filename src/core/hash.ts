@@ -36,6 +36,8 @@ export function serializeWorld(world: WorldState): string {
       player.investigation.remainingTicks,
     ].join(',') : '-',
     player.investigationPauseTicks,
+    player.disabledTicks,
+    player.respawnInvulnerableTicks,
   ].join(',')).join('|');
   const shots = [...world.shots]
     .sort((first, second) => first.id - second.id)
@@ -55,6 +57,25 @@ export function serializeWorld(world: WorldState): string {
       trap.discoveredBy.join(''),
     ].join(','))
     .join('|');
+  const events = [...world.events]
+    .sort((first, second) => first.id - second.id)
+    .map((event) => [
+      event.id,
+      event.tick,
+      event.chainId,
+      event.parentEventId ?? '-',
+      event.chainLength,
+      event.trapId,
+      event.owner,
+      event.kind,
+      event.target,
+      event.responsibleActor,
+      event.x,
+      event.y,
+      event.damage,
+      event.pushX,
+      event.pushY,
+    ].join(',')).join('|');
   return [
     world.phase,
     world.tick,
@@ -63,6 +84,11 @@ export function serializeWorld(world: WorldState): string {
     players,
     shots,
     traps,
+    events,
+    world.nextEventId,
+    world.nextChainId,
+    world.maxChain,
+    world.result ?? '-',
     world.shotsFired.join(','),
     world.trapsPlaced.join(','),
     world.trapsDisarmed.join(','),

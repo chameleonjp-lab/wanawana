@@ -172,13 +172,26 @@ function drawWorld(): void {
     stage.addChild(preview);
   }
 
+  for (const event of world.events) {
+    const age = world.tick - event.tick;
+    if (age < 0 || age > 30) continue;
+    const eventX = offsetX + cellToPixels(event.x, pixelsPerCell);
+    const eventY = offsetY + cellToPixels(event.y, pixelsPerCell);
+    const marker = new Graphics();
+    const color = event.kind === 'bounce' ? 0x8cbdff : event.kind === 'shock' ? 0xffdc73 : 0xff99c8;
+    marker.circle(eventX, eventY, Math.max(10, pixelsPerCell * (0.2 + age / 180)))
+      .stroke({ color, alpha: Math.max(0.2, 1 - age / 30), width: 2 });
+    stage.addChild(marker);
+  }
+
   for (const player of world.players) {
     const x = offsetX + cellToPixels(player.x, pixelsPerCell);
     const y = offsetY + cellToPixels(player.y, pixelsPerCell);
     const size = Math.max(18, pixelsPerCell * 0.64);
     const color = player.id === 0 ? 0xffd37a : 0xd59aff;
     const token = new Graphics();
-    token.roundRect(x - size / 2, y - size / 2, size, size, size * 0.25).fill({ color });
+    const alpha = player.disabledTicks > 0 ? 0.35 : 1;
+    token.roundRect(x - size / 2, y - size / 2, size, size, size * 0.25).fill({ color, alpha });
     token.roundRect(x - size / 2, y - size / 2, size, size, size * 0.25).stroke({ color: 0xffffff, alpha: 0.85, width: 2 });
     stage.addChild(token);
   }
@@ -196,6 +209,7 @@ function drawWorld(): void {
 
 function updateHud(): void {
   if (!world) return;
+  const currentWorld = world;
   timeValue.textContent = Math.max(0, (150 - world.tick / 60)).toFixed(1);
   playerHp.textContent = String(world.players[0].hp);
   cpuHp.textContent = String(world.players[1].hp);
@@ -213,7 +227,12 @@ function updateHud(): void {
   } else if (dangerCue) {
     trapPreview.textContent = '近くに危険な気配。方向は不明';
   } else {
-    trapPreview.textContent = '罠札を押して足元へ予告';
+    const recentEvent = [...currentWorld.events].reverse().find((event) => currentWorld.tick - event.tick <= 18);
+    if (recentEvent) {
+      trapPreview.textContent = `${trapName(recentEvent.kind)}が発動。連鎖 ${recentEvent.chainLength}`;
+    } else {
+      trapPreview.textContent = '罠札を押して足元へ予告';
+    }
   }
 }
 
@@ -291,7 +310,16 @@ function finishBattle(): void {
   inputController.deactivate();
   if (!world) return;
   machine.transition('result');
-  resultSummary.textContent = `150秒の試合を${world.tick}tickで完了しました。設置・調査・解除の状態を記録済みです。発動順と敗因の設計図は次の段階で追加します。`;
+  const resultLabel = world.result === 'player-win'
+    ? 'あなたの勝ち'
+    : world.result === 'cpu-win'
+      ? 'CPUの勝ち'
+      : world.result === 'technical-invalid'
+        ? '技術的に無効'
+        : world.result === 'draw' || world.result === 'time-draw'
+          ? '引き分け'
+          : '試合終了';
+  resultSummary.textContent = `${resultLabel}。${world.tick}tickで終了し、罠発動${world.events.length}件・最大連鎖${world.maxChain}を記録しました。設計図の詳細表示は次の段階で追加します。`;
   resultHash.textContent = world.lastHash;
   updateScreen();
 }
