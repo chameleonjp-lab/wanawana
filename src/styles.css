@@ -78,6 +78,16 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .trap-card-hatch { border-color: #ff99c8; }
 .hint { margin: 14px 0 0; font-size: .82rem; }
 .overlay-screen { text-align: center; }
+.result-details { display: grid; gap: 12px; margin-top: 18px; text-align: left; }
+.result-reason { margin: 0; padding: 12px 14px; border: 1px solid #5a4c78; border-radius: 14px; color: #f7f1e7; background: #211a37; }
+.result-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.result-stat { margin: 0; padding: 10px 12px; border-radius: 12px; color: #ddd4e8; background: #2b2246; font-size: .78rem; }
+.result-stat strong { display: block; margin-top: 3px; color: #ffd37a; font-size: 1.05rem; }
+.result-chains { margin: 0; padding: 0; list-style: none; }
+.result-chains > li { margin-top: 8px; padding: 10px 12px; border-left: 3px solid #f2b8ff; border-radius: 0 10px 10px 0; color: #ddd4e8; background: #211a37; font-size: .78rem; line-height: 1.55; }
+.result-chains > li:first-child { margin-top: 0; }
+.result-chain-heading { display: block; color: #f7f1e7; font-weight: 800; }
+.result-chain-empty { margin: 0; color: #a99dbb; font-size: .78rem; }
 .result-hash { overflow-wrap: anywhere; font-size: .8rem; }
 code { color: #ffd37a; }
 
