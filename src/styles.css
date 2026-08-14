@@ -66,6 +66,7 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .fire-pad small, .inspect-button small { font-size: .62rem; font-weight: 600; }
 .inspect-button { min-width: 96px; min-height: 56px; border: 1px solid #725f97; border-radius: 14px; color: #c0b5d1; background: #2b2246; font-weight: 700; }
 .inspect-button:active { color: #251735; background: #f2b8ff; }
+.inspect-button.is-unavailable { border-style: dashed; color: #897d9f; opacity: .72; }
 .control-caption { max-width: 132px; min-height: 2.4em; color: #cfc3df; font-size: .64rem; line-height: 1.2; text-align: center; }
 .trap-rack { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; touch-action: none; user-select: none; -webkit-user-select: none; }
 .trap-preview { grid-column: 1 / -1; min-height: 1.4em; color: #f2b8ff; font-size: .72rem; text-align: center; }

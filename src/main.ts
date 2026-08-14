@@ -1,7 +1,7 @@
 import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { AppStateMachine } from './app/state.ts';
-import { cellCenterUnits, cellToPixels, snapToCell } from './core/fixed.ts';
+import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, type InputCommand, type WorldState } from './core/types.ts';
 import { InputController } from './input/controller.ts';
@@ -26,6 +26,7 @@ const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
 const resultHash = getElement<HTMLElement>('result-hash');
 const trapPreview = getElement<HTMLElement>('trap-preview');
+const inspectButton = getElement<HTMLButtonElement>('inspect-button');
 const controls = getElement<HTMLElement>('controls');
 
 let pixiApp: Application | null = null;
@@ -151,6 +152,15 @@ function drawWorld(): void {
   }
 
   const player = world.players[0];
+  const dangerCue = hasDangerCue(player, world.traps);
+  if (dangerCue) {
+    const warning = new Graphics();
+    const warningX = offsetX + cellToPixels(player.x, pixelsPerCell);
+    const warningY = offsetY + cellToPixels(player.y, pixelsPerCell);
+    warning.circle(warningX, warningY, Math.max(18, pixelsPerCell * 0.48))
+      .stroke({ color: 0xffdc73, alpha: 0.9, width: 2 });
+    stage.addChild(warning);
+  }
   const previewCellX = player.placement?.cellX ?? inputController.previewCell?.cellX ?? snapToCell(player.x, ARENA_WIDTH_CELLS);
   const previewCellY = player.placement?.cellY ?? inputController.previewCell?.cellY ?? snapToCell(player.y, ARENA_HEIGHT_CELLS);
   if (inputController.previewTrap || player.placement) {
@@ -191,15 +201,33 @@ function updateHud(): void {
   cpuHp.textContent = String(world.players[1].hp);
   gearValue.textContent = String(world.players[0].gear);
   tickValue.textContent = String(world.tick);
+  const dangerCue = hasDangerCue(world.players[0], world.traps);
+  inspectButton.classList.toggle('is-unavailable', !dangerCue);
+  inspectButton.setAttribute('aria-disabled', String(!dangerCue));
   if (inputController.previewTrap) {
     trapPreview.textContent = `${trapName(inputController.previewTrap)}を足元へ予告中。離して設置`;
   } else if (world.players[0].placement) {
     trapPreview.textContent = `${trapName(world.players[0].placement.kind)}を設置中…`;
   } else if (world.players[0].investigation) {
     trapPreview.textContent = world.players[0].investigation.mode === 'reveal' ? '調査中…' : '解除中…';
+  } else if (dangerCue) {
+    trapPreview.textContent = '近くに危険な気配。方向は不明';
   } else {
     trapPreview.textContent = '罠札を押して足元へ予告';
   }
+}
+
+function hasDangerCue(
+  player: WorldState['players'][number],
+  traps: WorldState['traps'],
+): boolean {
+  const radiusSquared = INVESTIGATE_RADIUS_UNITS * INVESTIGATE_RADIUS_UNITS;
+  return traps.some((trap) => {
+    if (trap.owner === player.id || trap.armingTicks > 0 || trap.discoveredBy[player.id]) return false;
+    const dx = player.x - cellCenterUnits(trap.cellX);
+    const dy = player.y - cellCenterUnits(trap.cellY);
+    return dx * dx + dy * dy <= radiusSquared;
+  });
 }
 
 function trapName(kind: 'bounce' | 'shock' | 'hatch'): string {
