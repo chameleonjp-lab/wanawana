@@ -1,7 +1,7 @@
 import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { AppStateMachine } from './app/state.ts';
-import { cellToPixels } from './core/fixed.ts';
+import { cellCenterUnits, cellToPixels, snapToCell } from './core/fixed.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, type InputCommand, type WorldState } from './core/types.ts';
 import { InputController } from './input/controller.ts';
@@ -21,9 +21,11 @@ const arena = getElement<HTMLElement>('arena');
 const timeValue = getElement<HTMLElement>('time-value');
 const playerHp = getElement<HTMLElement>('player-hp');
 const cpuHp = getElement<HTMLElement>('cpu-hp');
+const gearValue = getElement<HTMLElement>('gear-value');
 const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
 const resultHash = getElement<HTMLElement>('result-hash');
+const trapPreview = getElement<HTMLElement>('trap-preview');
 const controls = getElement<HTMLElement>('controls');
 
 let pixiApp: Application | null = null;
@@ -98,6 +100,12 @@ async function ensurePixi(): Promise<boolean> {
 }
 
 function readInput(): InputCommand {
+  if (world && inputController.previewTrap) {
+    inputController.capturePreviewCell(
+      snapToCell(world.players[0].x, ARENA_WIDTH_CELLS),
+      snapToCell(world.players[0].y, ARENA_HEIGHT_CELLS),
+    );
+  }
   return inputController.readCommand();
 }
 
@@ -129,6 +137,31 @@ function drawWorld(): void {
   grid.stroke({ color: 0x3b2c54, alpha: 0.72, width: 1 });
   stage.addChild(grid);
 
+  for (const trap of world.traps) {
+    if (trap.owner === 1 && !trap.discoveredBy[0]) continue;
+    const x = offsetX + cellToPixels(cellCenterUnits(trap.cellX), pixelsPerCell);
+    const y = offsetY + cellToPixels(cellCenterUnits(trap.cellY), pixelsPerCell);
+    const color = trap.kind === 'bounce' ? 0x8cbdff : trap.kind === 'shock' ? 0xffdc73 : 0xff99c8;
+    const marker = new Graphics();
+    const alpha = trap.armingTicks > 0 ? 0.45 : 0.9;
+    marker.roundRect(x - pixelsPerCell * 0.28, y - pixelsPerCell * 0.28, pixelsPerCell * 0.56, pixelsPerCell * 0.56, pixelsPerCell * 0.12)
+      .fill({ color, alpha })
+      .stroke({ color: 0xffffff, alpha: 0.7, width: 1.5 });
+    stage.addChild(marker);
+  }
+
+  const player = world.players[0];
+  const previewCellX = player.placement?.cellX ?? inputController.previewCell?.cellX ?? snapToCell(player.x, ARENA_WIDTH_CELLS);
+  const previewCellY = player.placement?.cellY ?? inputController.previewCell?.cellY ?? snapToCell(player.y, ARENA_HEIGHT_CELLS);
+  if (inputController.previewTrap || player.placement) {
+    const preview = new Graphics();
+    const previewX = offsetX + cellToPixels(cellCenterUnits(previewCellX), pixelsPerCell);
+    const previewY = offsetY + cellToPixels(cellCenterUnits(previewCellY), pixelsPerCell);
+    preview.roundRect(previewX - pixelsPerCell * 0.38, previewY - pixelsPerCell * 0.38, pixelsPerCell * 0.76, pixelsPerCell * 0.76, pixelsPerCell * 0.14)
+      .stroke({ color: 0xf2b8ff, alpha: 0.9, width: 2 });
+    stage.addChild(preview);
+  }
+
   for (const player of world.players) {
     const x = offsetX + cellToPixels(player.x, pixelsPerCell);
     const y = offsetY + cellToPixels(player.y, pixelsPerCell);
@@ -156,7 +189,21 @@ function updateHud(): void {
   timeValue.textContent = Math.max(0, (150 - world.tick / 60)).toFixed(1);
   playerHp.textContent = String(world.players[0].hp);
   cpuHp.textContent = String(world.players[1].hp);
+  gearValue.textContent = String(world.players[0].gear);
   tickValue.textContent = String(world.tick);
+  if (inputController.previewTrap) {
+    trapPreview.textContent = `${trapName(inputController.previewTrap)}を足元へ予告中。離して設置`;
+  } else if (world.players[0].placement) {
+    trapPreview.textContent = `${trapName(world.players[0].placement.kind)}を設置中…`;
+  } else if (world.players[0].investigation) {
+    trapPreview.textContent = world.players[0].investigation.mode === 'reveal' ? '調査中…' : '解除中…';
+  } else {
+    trapPreview.textContent = '罠札を押して足元へ予告';
+  }
+}
+
+function trapName(kind: 'bounce' | 'shock' | 'hatch'): string {
+  return kind === 'bounce' ? 'ハネ板' : kind === 'shock' ? 'ビリビリ盤' : 'パカット床';
 }
 
 function startLoop(): void {
@@ -216,7 +263,7 @@ function finishBattle(): void {
   inputController.deactivate();
   if (!world) return;
   machine.transition('result');
-  resultSummary.textContent = `150秒の試合を${world.tick}tickで完了しました。次の段階で罠と敗因の表示を追加します。`;
+  resultSummary.textContent = `150秒の試合を${world.tick}tickで完了しました。設置・調査・解除の状態を記録済みです。発動順と敗因の設計図は次の段階で追加します。`;
   resultHash.textContent = world.lastHash;
   updateScreen();
 }

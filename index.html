@@ -17,7 +17,7 @@
       <section id="title-view" class="screen" aria-labelledby="title-heading">
         <h2 id="title-heading">見えない仕掛けを、先に読む。</h2>
         <p>
-          指で移動台を動かし、射撃台を離して入力できます。現在は舞台の移動と入力中断を確認する試作版です。
+          指で移動し、誘導弾で相手を罠へ押し込みます。罠札を押して足元を予告し、離して設置。中央ボタンを押し続けると近くの敵罠を調査・解除できます。
         </p>
         <button id="start-button" class="primary-button" type="button">舞台に入る</button>
       </section>
@@ -40,6 +40,7 @@
           <span>残り <strong id="time-value">150.0</strong>秒</span>
           <span>あなた <strong id="player-hp">100</strong></span>
           <span>CPU <strong id="cpu-hp">100</strong></span>
+          <span>歯車 <strong id="gear-value">3</strong>/5</span>
           <span>tick <strong id="tick-value">0</strong></span>
         </div>
         <div id="arena" class="arena" aria-label="闘技場"></div>
@@ -50,7 +51,7 @@
             </div>
             <span class="control-caption">移動</span>
           </div>
-          <button id="inspect-button" class="inspect-button" type="button" disabled>調査・解除<br /><small>次段階で追加</small></button>
+          <button id="inspect-button" class="inspect-button" data-input-role="inspect" type="button">調査・解除<br /><small>押し続ける</small></button>
           <div class="control-column">
             <button class="fire-pad" data-input-role="fire" type="button" aria-label="射撃。離して発射">
               <span aria-hidden="true">射撃</span>
@@ -58,8 +59,14 @@
             </button>
             <span class="control-caption">キーボード: WASD / 矢印 / Space</span>
           </div>
+          <div class="trap-rack" aria-label="罠札">
+            <span id="trap-preview" class="trap-preview" aria-live="polite">罠札を押して足元へ予告</span>
+            <button class="trap-card trap-card-bounce" data-input-role="trap-bounce" type="button">ハネ板<small>歯車1</small></button>
+            <button class="trap-card trap-card-shock" data-input-role="trap-shock" type="button">ビリビリ盤<small>歯車2</small></button>
+            <button class="trap-card trap-card-hatch" data-input-role="trap-hatch" type="button">パカット床<small>歯車2</small></button>
+          </div>
         </div>
-        <p class="hint">移動パッドは指を動かして方向を選びます。射撃は相手へ自動照準し、離すと1発だけ飛びます。弾は体力を減らさず、当たった人を押します。</p>
+        <p class="hint">移動パッドは指を動かして方向を選びます。射撃は相手へ自動照準し、離すと1発だけ飛びます。罠札は押している間に足元を予告し、離すと設置動作を始めます。弾や中断で動作は取り消され、成功時だけ歯車を消費します。</p>
       </section>
 
       <section id="pause-view" class="screen overlay-screen is-hidden" aria-labelledby="pause-heading">
