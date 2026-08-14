@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, MATCH_TICKS } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
+import { FIRE_COOLDOWN_TICKS, SHOT_PUSH_UNITS } from '../../src/core/fixed.ts';
 
 describe('fixed simulation', () => {
   it('replays the same accepted commands to the same hash', () => {
@@ -38,5 +39,33 @@ describe('fixed simulation', () => {
     world = advanceWorld(world);
     expect(world.tick).toBe(MATCH_TICKS);
     expect(world.phase).toBe('result');
+  });
+
+  it('fires one non-damaging shot and enforces its cooldown', () => {
+    let world = createWorld(7);
+    world = advanceWorld(world, { fire: true });
+    expect(world.shotsFired[0]).toBe(1);
+    expect(world.players[1].hp).toBe(100);
+    expect(world.shots).toHaveLength(1);
+
+    world = advanceWorld(world, { fire: true });
+    expect(world.shotsFired[0]).toBe(1);
+    for (let tick = 0; tick < FIRE_COOLDOWN_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+    world = advanceWorld(world, { fire: true });
+    expect(world.shotsFired[0]).toBe(2);
+  });
+
+  it('pushes the target on a continuous hit without dealing damage', () => {
+    let world = createWorld(9);
+    world = advanceWorld(world, { fire: true });
+    for (let tick = 0; tick < 40 && world.players[1].pushImmunityTicks === 0; tick += 1) {
+      world = advanceWorld(world);
+    }
+    expect(world.players[1].hp).toBe(100);
+    expect(world.players[1].pushImmunityTicks).toBeGreaterThan(0);
+    expect(world.players[1].x).toBeGreaterThan(7 * 9_600 - SHOT_PUSH_UNITS);
+    expect(world.shots).toHaveLength(0);
   });
 });
