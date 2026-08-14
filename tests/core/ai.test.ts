@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { chooseCpuDecision } from '../../src/core/ai.ts';
+import {
+  CPU_DIFFICULTY_PROFILES,
+  getCpuDifficultyProfile,
+  isCpuAimAligned,
+  normalizeCpuDifficulty,
+} from '../../src/core/difficulty.ts';
 import { INVESTIGATE_RADIUS_UNITS } from '../../src/core/fixed.ts';
 import { CELL_UNITS, type TrapState, type WorldState } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
@@ -20,6 +26,22 @@ function enemyTrap(overrides: Partial<TrapState> = {}): TrapState {
 }
 
 describe('deterministic CPU cognition', () => {
+  it('keeps the three difficulty profiles inside the visible-rule contract', () => {
+    expect(normalizeCpuDifficulty('unknown')).toBe('normal');
+    expect(CPU_DIFFICULTY_PROFILES.easy.reactionCadenceTicks).toBe(24);
+    expect(CPU_DIFFICULTY_PROFILES.normal.reactionCadenceTicks).toBe(17);
+    expect(CPU_DIFFICULTY_PROFILES.hard.reactionCadenceTicks).toBe(13);
+    expect(CPU_DIFFICULTY_PROFILES.easy.chainPlanning).toBe(1);
+    expect(CPU_DIFFICULTY_PROFILES.normal.chainPlanning).toBe(2);
+    expect(CPU_DIFFICULTY_PROFILES.hard.chainPlanning).toBe(3);
+  });
+
+  it('uses deterministic integer arithmetic for aiming variation', () => {
+    const profile = getCpuDifficultyProfile('easy');
+    expect(isCpuAimAligned(99, 12, profile)).toBe(isCpuAimAligned(99, 12, profile));
+    expect(isCpuAimAligned(99, 12, getCpuDifficultyProfile('hard'))).toBe(true);
+  });
+
   it('returns the same decision for the same visible world', () => {
     const world = createWorld(2026);
     expect(chooseCpuDecision(world)).toEqual(chooseCpuDecision(world));
@@ -87,5 +109,34 @@ describe('deterministic CPU cognition', () => {
     expect(decision.command.fire).toBe(true);
     const next = advanceWorld(world, {}, decision.command);
     expect(next.shotsFired[1]).toBe(1);
+  });
+
+  it('makes the difficulty affect response timing without revealing hidden traps', () => {
+    const base = createWorld(2032);
+    const trap = enemyTrap({ cellX: 7, cellY: 6 });
+    const world: WorldState = {
+      ...base,
+      tick: 13,
+      players: [base.players[0], { ...base.players[1], x: 7 * CELL_UNITS - INVESTIGATE_RADIUS_UNITS / 2 }],
+      traps: [trap],
+      nextEntityId: 100,
+    };
+    const easy = chooseCpuDecision(world, 'easy');
+    const hard = chooseCpuDecision(world, 'hard');
+    expect(easy.visibleTrapIds).toEqual([]);
+    expect(hard.visibleTrapIds).toEqual([]);
+    expect(easy.reason).not.toBe('investigating');
+    expect(hard.reason).toBe('investigating');
+  });
+
+  it('limits easy planning and lets hard plan the terminal trap role', () => {
+    const base = createWorld(2033);
+    const intermediate: WorldState = { ...base, tick: 225 };
+    expect(chooseCpuDecision(intermediate, 'easy').command.placeTrap).toBe('bounce');
+    expect(chooseCpuDecision(intermediate, 'normal').command.placeTrap).toBe('shock');
+
+    const terminal: WorldState = { ...base, tick: 405 };
+    expect(chooseCpuDecision(terminal, 'normal').command.placeTrap).toBe('bounce');
+    expect(chooseCpuDecision(terminal, 'hard').command.placeTrap).toBe('hatch');
   });
 });

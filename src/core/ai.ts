@@ -16,8 +16,14 @@ import {
   type TrapDirection,
   type TrapKind,
   type TrapState,
+  type CpuDifficulty,
   type WorldState,
 } from './types.ts';
+import {
+  getCpuDifficultyProfile,
+  isCpuAimAligned,
+  isCpuReactionTick,
+} from './difficulty.ts';
 
 /** A short label explaining why the CPU accepted its command for this tick. */
 export type CpuActionReason =
@@ -92,10 +98,10 @@ function hasDangerCue(
     && trapDistanceSquared(player, trap) <= radiusSquared);
 }
 
-function chooseTrapKind(world: WorldState): TrapKind {
+function chooseTrapKind(world: WorldState, chainPlanning: 1 | 2 | 3): TrapKind {
   const cycle = Math.trunc(Math.max(0, world.tick - 45) / 180) % 3;
-  if (world.players[1].gear >= TRAP_COSTS.hatch && cycle === 2) return 'hatch';
-  if (world.players[1].gear >= TRAP_COSTS.shock && cycle === 1) return 'shock';
+  if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.hatch && cycle === 2) return 'hatch';
+  if (chainPlanning >= 2 && world.players[1].gear >= TRAP_COSTS.shock && cycle === 1) return 'shock';
   return 'bounce';
 }
 
@@ -171,9 +177,10 @@ function movementTowardTarget(
  * Decide one CPU command from the current world only.
  * Hidden enemy traps are not included in visibleTrapIds; only the shared danger cue can trigger investigation.
  */
-export function chooseCpuDecision(world: WorldState): CpuDecision {
+export function chooseCpuDecision(world: WorldState, difficulty: CpuDifficulty = 'normal'): CpuDecision {
   const cpu = world.players[1];
   const target = world.players[0];
+  const profile = getCpuDifficultyProfile(difficulty);
   const visible = visibleTraps(world);
   const visibleTrapIds = visible.map((trap) => trap.id);
 
@@ -188,14 +195,14 @@ export function chooseCpuDecision(world: WorldState): CpuDecision {
   }
 
   const revealedEnemyTrap = nearestVisibleEnemyTrap(cpu, visible, DISARM_RADIUS_UNITS);
-  if (revealedEnemyTrap) {
+  if (revealedEnemyTrap && isCpuReactionTick(world.tick, profile)) {
     return {
       command: command({ investigate: true, investigateStart: true }),
       reason: 'disarming',
       visibleTrapIds,
     };
   }
-  if (hasDangerCue(cpu, world.traps)) {
+  if (hasDangerCue(cpu, world.traps) && isCpuReactionTick(world.tick, profile)) {
     return {
       command: command({ investigate: true, investigateStart: true }),
       reason: 'investigating',
@@ -203,7 +210,7 @@ export function chooseCpuDecision(world: WorldState): CpuDecision {
     };
   }
 
-  const kind = chooseTrapKind(world);
+  const kind = chooseTrapKind(world, profile.chainPlanning);
   if (shouldPlace(world, kind)) {
     const placement = choosePlacement(world);
     if (placement) {
@@ -220,7 +227,12 @@ export function chooseCpuDecision(world: WorldState): CpuDecision {
     }
   }
 
-  if (cpu.fireCooldownTicks === 0 && !cpu.investigation && world.tick % 3 === 0) {
+  if (
+    cpu.fireCooldownTicks === 0
+    && !cpu.investigation
+    && world.tick % profile.fireCadenceTicks === 0
+    && isCpuAimAligned(world.seed, world.tick, profile)
+  ) {
     return {
       command: command({ fire: true }),
       reason: 'firing',

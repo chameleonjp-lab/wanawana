@@ -48,6 +48,10 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .secondary-button { width: 100%; border: 1px solid #ffd37a; margin-top: 16px; color: #ffd37a; background: transparent; font-weight: 700; }
 .text-button { border: 0; margin-top: 12px; color: #d7cde8; background: transparent; }
 .icon-button { border: 1px solid #725f97; padding: 0 14px; color: #f7f1e7; background: #2b2246; }
+.difficulty-choice { display: grid; grid-template-columns: 1fr minmax(140px, 180px); gap: 8px 12px; align-items: center; margin-top: 18px; padding: 14px; border: 1px solid #5a4c78; border-radius: 14px; background: #211a37; }
+.difficulty-choice label { color: #f7f1e7; font-weight: 700; }
+.difficulty-choice select { min-height: 44px; border: 1px solid #8f70ad; border-radius: 10px; padding: 0 10px; color: #251735; background: #f7f1e7; font: inherit; font-weight: 700; }
+.difficulty-help { grid-column: 1 / -1; margin: 0 !important; color: #cfc3df !important; font-size: .78rem; line-height: 1.45 !important; }
 
 .battle-screen { padding: clamp(14px, 3vw, 24px); }
 .battle-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
