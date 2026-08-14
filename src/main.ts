@@ -3,8 +3,9 @@ import './styles.css';
 import { AppStateMachine } from './app/state.ts';
 import { chooseCpuDecision } from './core/ai.ts';
 import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
+import { buildMatchReport, chainHeading } from './core/result.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
-import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, type InputCommand, type WorldState } from './core/types.ts';
+import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, TICK_RATE, type InputCommand, type WorldState } from './core/types.ts';
 import { InputController } from './input/controller.ts';
 
 const FRAME_MS = 1_000 / 60;
@@ -25,6 +26,7 @@ const cpuHp = getElement<HTMLElement>('cpu-hp');
 const gearValue = getElement<HTMLElement>('gear-value');
 const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
+const resultDetails = getElement<HTMLElement>('result-details');
 const resultHash = getElement<HTMLElement>('result-hash');
 const trapPreview = getElement<HTMLElement>('trap-preview');
 const inspectButton = getElement<HTMLButtonElement>('inspect-button');
@@ -308,21 +310,74 @@ function resumeGame(): void {
   startLoop();
 }
 
+function appendStat(parent: HTMLElement, label: string, value: string): void {
+  const item = document.createElement('p');
+  item.className = 'result-stat';
+  item.textContent = label;
+  const strong = document.createElement('strong');
+  strong.textContent = value;
+  item.append(strong);
+  parent.append(item);
+}
+
+function renderResultDetails(): void {
+  if (!world) return;
+  const report = buildMatchReport(world);
+  resultDetails.replaceChildren();
+
+  const reason = document.createElement('p');
+  reason.className = 'result-reason';
+  reason.textContent = report.resultReason;
+  resultDetails.append(reason);
+
+  const statGrid = document.createElement('div');
+  statGrid.className = 'result-stat-grid';
+  appendStat(statGrid, 'あなたの体力', String(report.players[0].hp));
+  appendStat(statGrid, 'CPUの体力', String(report.players[1].hp));
+  appendStat(statGrid, '試合時間', `${(report.durationTicks / TICK_RATE).toFixed(1)}秒`);
+  appendStat(statGrid, '最大連鎖', `${report.maxChain}段`);
+  appendStat(statGrid, 'あなたの罠 / 解除', `${report.players[0].trapsPlaced} / ${report.players[0].trapsDisarmed}`);
+  appendStat(statGrid, 'CPUの罠 / 解除', `${report.players[1].trapsPlaced} / ${report.players[1].trapsDisarmed}`);
+  resultDetails.append(statGrid);
+
+  const chainTitle = document.createElement('p');
+  chainTitle.className = 'result-reason';
+  chainTitle.textContent = `罠の記録（${report.eventCount}発動・${report.chains.length}連鎖）`;
+  resultDetails.append(chainTitle);
+
+  if (report.chains.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'result-chain-empty';
+    empty.textContent = 'この試合では罠の連鎖はありませんでした。';
+    resultDetails.append(empty);
+    return;
+  }
+
+  const list = document.createElement('ol');
+  list.className = 'result-chains';
+  const chains = report.chains.slice(-12);
+  for (const chain of chains) {
+    const item = document.createElement('li');
+    const heading = document.createElement('strong');
+    heading.className = 'result-chain-heading';
+    heading.textContent = chainHeading(chain);
+    item.append(heading);
+    const description = document.createElement('span');
+    description.textContent = `${chain.description}${chain.damage > 0 ? `（合計${chain.damage}ダメージ）` : ''}`;
+    item.append(description);
+    list.append(item);
+  }
+  resultDetails.append(list);
+}
+
 function finishBattle(): void {
   cancelAnimationFrame(frameId);
   inputController.deactivate();
   if (!world) return;
   machine.transition('result');
-  const resultLabel = world.result === 'player-win'
-    ? 'あなたの勝ち'
-    : world.result === 'cpu-win'
-      ? 'CPUの勝ち'
-      : world.result === 'technical-invalid'
-        ? '技術的に無効'
-        : world.result === 'draw' || world.result === 'time-draw'
-          ? '引き分け'
-          : '試合終了';
-  resultSummary.textContent = `${resultLabel}。${world.tick}tickで終了し、罠発動${world.events.length}件・最大連鎖${world.maxChain}を記録しました。設計図の詳細表示は次の段階で追加します。`;
+  const report = buildMatchReport(world);
+  resultSummary.textContent = `${report.resultLabel}。${world.tick}tickで試合を終えました。`;
+  renderResultDetails();
   resultHash.textContent = world.lastHash;
   updateScreen();
 }
