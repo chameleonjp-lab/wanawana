@@ -10,8 +10,20 @@ function fnv1a(value: string): string {
 }
 
 export function serializeWorld(world: WorldState): string {
-  const players = world.players.map((player) => `${player.id},${player.x},${player.y},${player.hp}`).join('|');
-  return [world.phase, world.tick, world.seed, players, world.shotsFired.join(',')].join(';');
+  const players = world.players.map((player) => [
+    player.id,
+    player.x,
+    player.y,
+    player.hp,
+    player.fireCooldownTicks,
+    player.fireSlowTicks,
+    player.pushImmunityTicks,
+  ].join(',')).join('|');
+  const shots = [...world.shots]
+    .sort((first, second) => first.id - second.id)
+    .map((shot) => [shot.id, shot.owner, shot.x, shot.y, shot.vx, shot.vy, shot.travelledUnits].join(','))
+    .join('|');
+  return [world.phase, world.tick, world.seed, world.nextEntityId, players, shots, world.shotsFired.join(',')].join(';');
 }
 
 export function hashWorld(world: WorldState): string {

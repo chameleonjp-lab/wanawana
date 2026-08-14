@@ -11,6 +11,19 @@ export interface PlayerState {
   readonly x: number;
   readonly y: number;
   readonly hp: number;
+  readonly fireCooldownTicks: number;
+  readonly fireSlowTicks: number;
+  readonly pushImmunityTicks: number;
+}
+
+export interface ShotState {
+  readonly id: number;
+  readonly owner: 0 | 1;
+  readonly x: number;
+  readonly y: number;
+  readonly vx: number;
+  readonly vy: number;
+  readonly travelledUnits: number;
 }
 
 export interface InputCommand {
@@ -24,6 +37,8 @@ export interface WorldState {
   readonly tick: number;
   readonly seed: number;
   readonly players: readonly [PlayerState, PlayerState];
+  readonly shots: readonly ShotState[];
+  readonly nextEntityId: number;
   readonly shotsFired: readonly [number, number];
   readonly lastHash: string;
 }

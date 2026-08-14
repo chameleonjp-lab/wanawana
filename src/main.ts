@@ -140,6 +140,14 @@ function drawWorld(): void {
     stage.addChild(token);
   }
 
+  for (const shot of world.shots) {
+    const x = offsetX + cellToPixels(shot.x, pixelsPerCell);
+    const y = offsetY + cellToPixels(shot.y, pixelsPerCell);
+    const projectile = new Graphics();
+    projectile.circle(x, y, Math.max(4, pixelsPerCell * 0.12)).fill({ color: 0xfff2b0 });
+    stage.addChild(projectile);
+  }
+
   pixiApp.renderer.render(stage);
 }
 
