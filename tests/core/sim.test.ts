@@ -10,6 +10,7 @@ import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 import {
   DISARM_TICKS,
   FIRE_COOLDOWN_TICKS,
+  HATCH_DISABLED_TICKS,
   INVESTIGATE_TICKS,
   MAX_ACTIVE_TRAPS,
   SHOT_PUSH_UNITS,
@@ -125,7 +126,7 @@ describe('fixed simulation', () => {
       direction: 0,
       cellX: index + 2,
       cellY: 6,
-      armingTicks: 0,
+      armingTicks: 1,
       remainingTicks: 1_800,
       discoveredBy: [true, false],
     }));
@@ -175,9 +176,9 @@ describe('fixed simulation', () => {
       owner: 1,
       kind: 'bounce',
       direction: 0,
-      cellX: 2,
+      cellX: 3,
       cellY: 6,
-      armingTicks: 0,
+      armingTicks: 1,
       remainingTicks: 1_800,
       discoveredBy: [false, true],
     };
@@ -193,13 +194,18 @@ describe('fixed simulation', () => {
       owner: 1,
       kind: 'bounce',
       direction: 0,
-      cellX: 2,
+      cellX: 3,
       cellY: 6,
       armingTicks: 0,
       remainingTicks: 1_800,
       discoveredBy: [false, true],
     };
-    let world: WorldState = { ...base, traps: [enemyTrap], nextEntityId: 3 };
+    let world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 21_600 }, base.players[1]],
+      traps: [enemyTrap],
+      nextEntityId: 3,
+    };
     world = advanceWorld(world, { investigate: true, investigateStart: true });
     expect(world.players[0].investigation?.mode).toBe('reveal');
     for (let tick = 0; tick < INVESTIGATE_TICKS; tick += 1) {
@@ -234,5 +240,136 @@ describe('fixed simulation', () => {
     world = { ...world, traps: [enemyTrap], nextEntityId: enemyTrap.id + 1 };
     world = advanceWorld(world, { investigate: true });
     expect(world.players[0].investigation).toBeNull();
+  });
+
+  it('triggers a bounce trap and records a root event', () => {
+    const base = createWorld(16);
+    const trap: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'bounce',
+      direction: 1,
+      cellX: 3,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    const world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 28_288 }, base.players[1]],
+      traps: [trap],
+      nextEntityId: 3,
+    };
+    const next = advanceWorld(world, { moveX: 1 });
+    expect(next.traps).toHaveLength(0);
+    expect(next.events).toHaveLength(1);
+    expect(next.events[0]).toMatchObject({
+      trapId: 2,
+      kind: 'bounce',
+      target: 0,
+      parentEventId: null,
+      chainLength: 1,
+      damage: 0,
+    });
+    expect(next.players[0].x).toBeGreaterThan(28_288);
+  });
+
+  it('connects a bounce into a shock trap within the same tick', () => {
+    const base = createWorld(17);
+    const traps: TrapState[] = [
+      {
+        id: 2,
+        owner: 1,
+        kind: 'bounce',
+        direction: 1,
+        cellX: 2,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+      {
+        id: 3,
+        owner: 1,
+        kind: 'shock',
+        direction: 0,
+        cellX: 4,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+    ];
+    const world: WorldState = { ...base, traps, nextEntityId: 4 };
+    const next = advanceWorld(world);
+    expect(next.traps).toHaveLength(0);
+    expect(next.players[0].hp).toBe(82);
+    expect(next.events).toHaveLength(2);
+    expect(next.events[1]).toMatchObject({
+      trapId: 3,
+      parentEventId: next.events[0].id,
+      chainId: next.events[0].chainId,
+      chainLength: 2,
+      damage: 18,
+    });
+    expect(next.maxChain).toBe(2);
+  });
+
+  it('temporarily removes a hatch target and returns it to its spawn point', () => {
+    const base = createWorld(18);
+    const trap: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'hatch',
+      direction: 0,
+      cellX: 3,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    let world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 28_800 }, base.players[1]],
+      traps: [trap],
+      nextEntityId: 3,
+    };
+    world = advanceWorld(world);
+    expect(world.players[0].hp).toBe(74);
+    expect(world.players[0].disabledTicks).toBe(HATCH_DISABLED_TICKS);
+    for (let tick = 0; tick < HATCH_DISABLED_TICKS; tick += 1) {
+      world = advanceWorld(world, { moveX: 1, fire: true });
+    }
+    expect(world.players[0].disabledTicks).toBe(0);
+    expect(world.players[0].x).toBe(2 * 9_600);
+    expect(world.players[0].respawnInvulnerableTicks).toBeGreaterThan(0);
+    expect(world.shotsFired[0]).toBe(0);
+  });
+
+  it('ends immediately when trap damage defeats one player', () => {
+    const base = createWorld(19);
+    const traps: TrapState[] = Array.from({ length: 4 }, (_, index) => ({
+      id: index + 2,
+      owner: 1,
+      kind: 'hatch',
+      direction: 0,
+      cellX: 2,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    }));
+    const world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], hp: 20 }, base.players[1]],
+      traps,
+      nextEntityId: 6,
+    };
+    const next = advanceWorld(world);
+    expect(next.players[0].hp).toBe(0);
+    expect(next.result).toBe('cpu-win');
+    expect(next.phase).toBe('result');
+    expect(next.events).toHaveLength(1);
   });
 });

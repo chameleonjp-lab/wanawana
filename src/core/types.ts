@@ -8,6 +8,7 @@ export const TRAP_KINDS = ['bounce', 'shock', 'hatch'] as const;
 export type TrapKind = (typeof TRAP_KINDS)[number];
 export type TrapDirection = 0 | 1 | 2 | 3;
 export type InvestigationMode = 'reveal' | 'disarm';
+export type MatchResult = 'player-win' | 'cpu-win' | 'draw' | 'time-draw' | 'technical-invalid';
 
 export interface PlacementState {
   readonly kind: TrapKind;
@@ -53,6 +54,8 @@ export interface PlayerState {
   readonly placement: PlacementState | null;
   readonly investigation: InvestigationState | null;
   readonly investigationPauseTicks: number;
+  readonly disabledTicks: number;
+  readonly respawnInvulnerableTicks: number;
 }
 
 export interface ShotState {
@@ -88,5 +91,28 @@ export interface WorldState {
   readonly shotsFired: readonly [number, number];
   readonly trapsPlaced: readonly [number, number];
   readonly trapsDisarmed: readonly [number, number];
+  readonly events: readonly TrapEvent[];
+  readonly nextEventId: number;
+  readonly nextChainId: number;
+  readonly maxChain: number;
+  readonly result: MatchResult | null;
   readonly lastHash: string;
+}
+
+export interface TrapEvent {
+  readonly id: number;
+  readonly tick: number;
+  readonly chainId: number;
+  readonly parentEventId: number | null;
+  readonly chainLength: number;
+  readonly trapId: number;
+  readonly owner: 0 | 1;
+  readonly kind: TrapKind;
+  readonly target: 0 | 1;
+  readonly responsibleActor: 0 | 1;
+  readonly x: number;
+  readonly y: number;
+  readonly damage: number;
+  readonly pushX: number;
+  readonly pushY: number;
 }
