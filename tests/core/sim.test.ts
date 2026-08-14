@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, MATCH_TICKS } from '../../src/core/types.ts';
+import {
+  ARENA_HEIGHT_CELLS,
+  ARENA_WIDTH_CELLS,
+  MATCH_TICKS,
+  type TrapState,
+  type WorldState,
+} from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
-import { FIRE_COOLDOWN_TICKS, SHOT_PUSH_UNITS } from '../../src/core/fixed.ts';
+import {
+  DISARM_TICKS,
+  FIRE_COOLDOWN_TICKS,
+  INVESTIGATE_TICKS,
+  MAX_ACTIVE_TRAPS,
+  SHOT_PUSH_UNITS,
+  TRAP_COSTS,
+  TRAP_PLACEMENT_TICKS,
+} from '../../src/core/fixed.ts';
 
 describe('fixed simulation', () => {
   it('replays the same accepted commands to the same hash', () => {
@@ -67,5 +81,158 @@ describe('fixed simulation', () => {
     expect(world.players[1].pushImmunityTicks).toBeGreaterThan(0);
     expect(world.players[1].x).toBeGreaterThan(7 * 9_600 - SHOT_PUSH_UNITS);
     expect(world.shots).toHaveLength(0);
+  });
+
+  it('starts a trap preview, then consumes one gear only after setup completes', () => {
+    let world = createWorld(12);
+    world = advanceWorld(world, { placeTrap: 'bounce' });
+    expect(world.players[0].placement?.kind).toBe('bounce');
+    expect(world.players[0].gear).toBe(3);
+    expect(world.traps).toHaveLength(0);
+
+    for (let tick = 0; tick < TRAP_PLACEMENT_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+    expect(world.traps).toHaveLength(0);
+    world = advanceWorld(world);
+    expect(world.traps).toHaveLength(1);
+    expect(world.traps[0].kind).toBe('bounce');
+    expect(world.traps[0].cellX).toBe(2);
+    expect(world.traps[0].cellY).toBe(6);
+    expect(world.players[0].gear).toBe(2);
+  });
+
+  it('uses the declared gear cost and rejects a trap without enough gear', () => {
+    let world = createWorld(121);
+    world = advanceWorld(world, { placeTrap: 'shock' });
+    for (let tick = 0; tick < TRAP_PLACEMENT_TICKS; tick += 1) {
+      world = advanceWorld(world);
+    }
+    expect(world.traps[0].kind).toBe('shock');
+    expect(world.players[0].gear).toBe(3 - TRAP_COSTS.shock);
+
+    world = { ...world, players: [{ ...world.players[0], gear: 1 }, world.players[1]] };
+    world = advanceWorld(world, { placeTrap: 'hatch' });
+    expect(world.players[0].placement).toBeNull();
+  });
+
+  it('does not exceed four active traps owned by one player', () => {
+    const base = createWorld(122);
+    const traps: TrapState[] = Array.from({ length: MAX_ACTIVE_TRAPS }, (_, index) => ({
+      id: index + 2,
+      owner: 0,
+      kind: 'bounce',
+      direction: 0,
+      cellX: index + 2,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [true, false],
+    }));
+    let world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], gear: 5 }, base.players[1]],
+      traps,
+      nextEntityId: traps.length + 2,
+    };
+    expect(world.traps.filter((trap) => trap.owner === 0)).toHaveLength(MAX_ACTIVE_TRAPS);
+    world = advanceWorld(world, { placeTrap: 'bounce' });
+    expect(world.players[0].placement).toBeNull();
+  });
+
+  it('cancels installation when a projectile lands on the completing tick', () => {
+    let world = createWorld(123);
+    world = advanceWorld(world, { placeTrap: 'bounce' });
+    for (let tick = 0; tick < TRAP_PLACEMENT_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+    const player = world.players[0];
+    const shot = {
+      id: world.nextEntityId,
+      owner: 1 as const,
+      x: player.x - 1_600,
+      y: player.y,
+      vx: 1_600,
+      vy: 0,
+      travelledUnits: 0,
+    };
+    world = {
+      ...world,
+      shots: [shot],
+      nextEntityId: shot.id + 1,
+    };
+    world = advanceWorld(world);
+    expect(world.traps).toHaveLength(0);
+    expect(world.players[0].gear).toBe(3);
+    expect(world.players[0].placement).toBeNull();
+    expect(world.players[0].pushImmunityTicks).toBeGreaterThan(0);
+  });
+
+  it('does not use an enemy hidden trap to reject placement', () => {
+    const base = createWorld(13);
+    const enemyTrap: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'bounce',
+      direction: 0,
+      cellX: 2,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    const world: WorldState = { ...base, traps: [enemyTrap], nextEntityId: 3 };
+    const next = advanceWorld(world, { placeTrap: 'shock' });
+    expect(next.players[0].placement?.kind).toBe('shock');
+  });
+
+  it('reveals and then disarms a nearby trap with a fixed target', () => {
+    const base = createWorld(14);
+    const enemyTrap: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'bounce',
+      direction: 0,
+      cellX: 2,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    let world: WorldState = { ...base, traps: [enemyTrap], nextEntityId: 3 };
+    world = advanceWorld(world, { investigate: true, investigateStart: true });
+    expect(world.players[0].investigation?.mode).toBe('reveal');
+    for (let tick = 0; tick < INVESTIGATE_TICKS; tick += 1) {
+      world = advanceWorld(world, { investigate: true });
+    }
+    expect(world.traps[0].discoveredBy[0]).toBe(true);
+    expect(world.players[0].investigation).toBeNull();
+
+    world = advanceWorld(world, { investigate: true, investigateStart: true });
+    expect(world.players[0].investigation?.mode).toBe('disarm');
+    for (let tick = 0; tick < DISARM_TICKS; tick += 1) {
+      world = advanceWorld(world, { investigate: true });
+    }
+    expect(world.traps).toHaveLength(0);
+    expect(world.trapsDisarmed[0]).toBe(1);
+  });
+
+  it('does not start investigation later when the button began invalid', () => {
+    let world = createWorld(15);
+    world = advanceWorld(world, { investigate: true, investigateStart: true });
+    const enemyTrap: TrapState = {
+      id: world.nextEntityId,
+      owner: 1,
+      kind: 'bounce',
+      direction: 0,
+      cellX: 2,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    world = { ...world, traps: [enemyTrap], nextEntityId: enemyTrap.id + 1 };
+    world = advanceWorld(world, { investigate: true });
+    expect(world.players[0].investigation).toBeNull();
   });
 });

@@ -4,6 +4,8 @@ import {
   CELL_UNITS,
   type InputCommand,
   type PlayerState,
+  type TrapDirection,
+  type TrapKind,
 } from './types.ts';
 
 export const PLAYER_SPEED_UNITS_PER_TICK = 512;
@@ -17,6 +19,25 @@ export const SHOT_RANGE_UNITS = 7 * CELL_UNITS;
 export const FIRE_COOLDOWN_TICKS = 39;
 export const FIRE_SLOW_TICKS = 9;
 export const PUSH_IMMUNITY_TICKS = 24;
+export const INVESTIGATION_PAUSE_TICKS = 12;
+export const GEAR_MAX = 5;
+export const GEAR_START = 3;
+export const GEAR_RECOVERY_TICKS = 360;
+export const MAX_ACTIVE_TRAPS = 4;
+export const TRAP_PLACEMENT_TICKS = 18;
+export const TRAP_ARMING_TICKS = 36;
+export const TRAP_LIFETIME_TICKS = 1_800;
+export const TRAP_COOLDOWN_TICKS = 21;
+export const INVESTIGATE_TICKS = 39;
+export const DISARM_TICKS = 54;
+export const INVESTIGATE_RADIUS_UNITS = Math.trunc(1.6 * CELL_UNITS);
+export const DISARM_RADIUS_UNITS = Math.trunc(0.8 * CELL_UNITS);
+
+export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
+  bounce: 1,
+  shock: 2,
+  hatch: 2,
+};
 
 const MIN_X = PLAYER_RADIUS_UNITS;
 const MIN_Y = PLAYER_RADIUS_UNITS;
@@ -56,7 +77,30 @@ export function normalizeCommand(command: Partial<InputCommand>): InputCommand {
     moveX: normalizeAxis(command.moveX ?? 0),
     moveY: normalizeAxis(command.moveY ?? 0),
     fire: command.fire === true,
+    placeTrap: command.placeTrap,
+    trapDirection: normalizeDirection(command.trapDirection),
+    trapCellX: Number.isInteger(command.trapCellX) ? command.trapCellX : undefined,
+    trapCellY: Number.isInteger(command.trapCellY) ? command.trapCellY : undefined,
+    investigate: command.investigate === true,
+    investigateStart: command.investigateStart === true,
   };
+}
+
+export function normalizeDirection(value: number | undefined): TrapDirection {
+  if (value === 1 || value === 2 || value === 3) return value;
+  return 0;
+}
+
+export function isTrapKind(value: string | undefined): value is TrapKind {
+  return value === 'bounce' || value === 'shock' || value === 'hatch';
+}
+
+export function snapToCell(value: number, maximumCells: number): number {
+  return clampInteger(Math.round(value / CELL_UNITS), 0, maximumCells - 1);
+}
+
+export function cellCenterUnits(cell: number): number {
+  return cell * CELL_UNITS;
 }
 
 export function cellToPixels(value: number, pixelsPerCell: number): number {
