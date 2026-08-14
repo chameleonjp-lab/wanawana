@@ -1,6 +1,7 @@
 import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { AppStateMachine } from './app/state.ts';
+import { chooseCpuDecision } from './core/ai.ts';
 import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, type InputCommand, type WorldState } from './core/types.ts';
@@ -274,7 +275,9 @@ function loop(timestamp: number): void {
 
   let processed = 0;
   while (accumulator >= FRAME_MS && processed < MAX_TICKS_PER_FRAME) {
-    world = advanceWorld(world, readInput());
+    const playerInput = readInput();
+    const cpuDecision = chooseCpuDecision(world);
+    world = advanceWorld(world, playerInput, cpuDecision.command);
     accumulator -= FRAME_MS;
     processed += 1;
   }
