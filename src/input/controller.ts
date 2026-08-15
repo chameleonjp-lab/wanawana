@@ -50,6 +50,7 @@ export class InputController {
   private investigateHeld = false;
   private investigateStartPending = false;
   private active = false;
+  private allowedTrapKinds: readonly TrapKind[] | null = null;
 
   public constructor(private readonly root: HTMLElement) {
     root.addEventListener('pointerdown', this.handlePointerDown);
@@ -71,6 +72,18 @@ export class InputController {
   public deactivate(): void {
     this.active = false;
     this.reset();
+  }
+
+  public setTrapLoadout(loadout: readonly TrapKind[] | null): void {
+    this.allowedTrapKinds = loadout;
+    if (this.trapPreview && loadout && !loadout.includes(this.trapPreview)) {
+      this.trapPreview = null;
+      this.trapPreviewCell = null;
+    }
+    if (this.trapPending && loadout && !loadout.includes(this.trapPending)) {
+      this.trapPending = null;
+      this.trapPendingCell = null;
+    }
   }
 
   public reset(): void {
@@ -171,6 +184,7 @@ export class InputController {
     if (!target || !this.root.contains(target)) return;
     const role = this.roleFromTarget(target);
     if (!role) return;
+    if (role.role === 'trap' && role.trapKind && this.allowedTrapKinds && !this.allowedTrapKinds.includes(role.trapKind)) return;
     if ([...this.pointers.values()].some((pointer) => pointer.role === role.role)) return;
 
     const rect = target.getBoundingClientRect();
@@ -271,6 +285,7 @@ export class InputController {
       return;
     }
     if (trapKind) {
+      if (this.allowedTrapKinds && !this.allowedTrapKinds.includes(trapKind)) return;
       if (!event.repeat) {
         this.trapKeyArmed = trapKind;
         this.trapPreview = trapKind;

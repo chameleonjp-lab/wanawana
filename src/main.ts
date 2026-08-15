@@ -7,10 +7,28 @@ import {
   getCpuDifficultyProfile,
   normalizeCpuDifficulty,
 } from './core/difficulty.ts';
-import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, MOYA_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
+import {
+  cellCenterUnits,
+  cellToPixels,
+  INVESTIGATE_RADIUS_UNITS,
+  isTrapKind,
+  MOYA_RADIUS_UNITS,
+  normalizeTrapLoadout,
+  snapToCell,
+} from './core/fixed.ts';
 import { buildMatchReport, chainHeading } from './core/result.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
-import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, TICK_RATE, type CpuDifficulty, type InputCommand, type TrapKind, type WorldState } from './core/types.ts';
+import {
+  ARENA_HEIGHT_CELLS,
+  ARENA_WIDTH_CELLS,
+  DEFAULT_TRAP_LOADOUT,
+  TICK_RATE,
+  type CpuDifficulty,
+  type InputCommand,
+  type TrapKind,
+  type TrapLoadout,
+  type WorldState,
+} from './core/types.ts';
 import { InputController } from './input/controller.ts';
 
 const FRAME_MS = 1_000 / 60;
@@ -39,6 +57,9 @@ const soundButton = getElement<HTMLButtonElement>('sound-button');
 const difficultySelect = getElement<HTMLSelectElement>('difficulty-select');
 const difficultyHelp = getElement<HTMLElement>('difficulty-help');
 const difficultyValue = getElement<HTMLElement>('difficulty-value');
+const loadoutSlot2 = getElement<HTMLSelectElement>('loadout-slot-2');
+const loadoutSlot3 = getElement<HTMLSelectElement>('loadout-slot-3');
+const loadoutHelp = getElement<HTMLElement>('loadout-help');
 const controls = getElement<HTMLElement>('controls');
 
 let pixiApp: Application | null = null;
@@ -47,6 +68,7 @@ let frameId = 0;
 let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
+let selectedLoadout: TrapLoadout = DEFAULT_TRAP_LOADOUT;
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
 
@@ -68,6 +90,7 @@ function updateScreen(): void {
   setVisible(pauseView, state === 'paused');
   setVisible(resultView, state === 'result');
   status.textContent = state === 'battle' ? '固定tickで舞台を動かしています' : state === 'paused' ? '試合を停止しています' : '';
+  updateTrapButtons();
 }
 
 function updateSoundButton(): void {
@@ -85,6 +108,29 @@ function updateDifficultyLabel(): void {
     : cpuDifficulty === 'hard'
       ? '危険への反応が早く、5種類の罠を連鎖に使います。'
       : '反応、射撃の正確さ、連鎖の考え方が標準です。';
+}
+
+function updateLoadoutLabel(): void {
+  const requested: TrapKind[] = [
+    'bounce',
+    isTrapKind(loadoutSlot2.value) ? loadoutSlot2.value : 'shock',
+    isTrapKind(loadoutSlot3.value) ? loadoutSlot3.value : 'hatch',
+  ];
+  selectedLoadout = normalizeTrapLoadout(requested);
+  loadoutSlot2.value = selectedLoadout[1];
+  loadoutSlot3.value = selectedLoadout[2];
+  loadoutHelp.textContent = `試合中は${selectedLoadout.map(trapName).join('・')}だけ設置できます。`;
+}
+
+function updateTrapButtons(): void {
+  const active = machine.state === 'battle';
+  const buttons = controls.querySelectorAll<HTMLButtonElement>('[data-input-role^="trap-"]');
+  for (const button of buttons) {
+    const rawKind = button.dataset.inputRole?.slice(5);
+    const enabled = !active || (isTrapKind(rawKind) && selectedLoadout.includes(rawKind));
+    button.disabled = !enabled;
+    button.setAttribute('aria-disabled', String(!enabled));
+  }
 }
 
 function webglAvailable(): boolean {
@@ -455,6 +501,7 @@ function finishBattle(): void {
 
 async function startBattle(): Promise<void> {
   updateDifficultyLabel();
+  updateLoadoutLabel();
   void soundEngine.resume().then(updateSoundButton);
   const ready = await ensurePixi();
   if (!ready) {
@@ -462,7 +509,8 @@ async function startBattle(): Promise<void> {
     updateSoundButton();
     return;
   }
-  world = createWorld(Date.now() >>> 0);
+  inputController.setTrapLoadout(selectedLoadout);
+  world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout);
   inputController.activate();
   machine.transition('battle');
   updateScreen();
@@ -474,6 +522,7 @@ async function startBattle(): Promise<void> {
 function returnToTitle(): void {
   cancelAnimationFrame(frameId);
   inputController.deactivate();
+  inputController.setTrapLoadout(null);
   soundEngine.suspend();
   world = null;
   if (machine.state === 'battle' || machine.state === 'paused' || machine.state === 'result') {
@@ -492,6 +541,8 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('resume-button').addEventListener('click', resumeGame);
   soundButton.addEventListener('click', () => void soundEngine.toggle().then(updateSoundButton));
   difficultySelect.addEventListener('change', updateDifficultyLabel);
+  loadoutSlot2.addEventListener('change', updateLoadoutLabel);
+  loadoutSlot3.addEventListener('change', updateLoadoutLabel);
   getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', returnToTitle);
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
@@ -520,6 +571,7 @@ bindEvents();
 updateScreen();
 updateSoundButton();
 updateDifficultyLabel();
+updateLoadoutLabel();
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {
   machine.transition('unsupported');

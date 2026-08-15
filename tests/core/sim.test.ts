@@ -121,6 +121,18 @@ describe('fixed simulation', () => {
     expect(world.players[0].placement).toBeNull();
   });
 
+  it('enforces the selected three-trap loadout and hashes it into the match', () => {
+    const defaultWorld = createWorld(124);
+    let world = createWorld(124, ['bounce', 'bomb', 'moya']);
+    expect(world.loadouts[0]).toEqual(['bounce', 'bomb', 'moya']);
+    expect(world.lastHash).not.toBe(defaultWorld.lastHash);
+
+    world = advanceWorld(world, { placeTrap: 'shock' });
+    expect(world.players[0].placement).toBeNull();
+    world = advanceWorld(world, { placeTrap: 'bomb' });
+    expect(world.players[0].placement?.kind).toBe('bomb');
+  });
+
   it('does not exceed four active traps owned by one player', () => {
     const base = createWorld(122);
     const traps: TrapState[] = Array.from({ length: MAX_ACTIVE_TRAPS }, (_, index) => ({

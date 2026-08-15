@@ -6,6 +6,8 @@ export const ARENA_HEIGHT_CELLS = 13;
 
 export const TRAP_KINDS = ['bounce', 'shock', 'hatch', 'bomb', 'moya'] as const;
 export type TrapKind = (typeof TRAP_KINDS)[number];
+export type TrapLoadout = readonly [TrapKind, TrapKind, TrapKind];
+export const DEFAULT_TRAP_LOADOUT: TrapLoadout = ['bounce', 'shock', 'hatch'];
 export type TrapDirection = 0 | 1 | 2 | 3;
 export type InvestigationMode = 'reveal' | 'disarm';
 export type MatchResult = 'player-win' | 'cpu-win' | 'draw' | 'time-draw' | 'technical-invalid';
@@ -95,6 +97,7 @@ export interface WorldState {
   readonly phase: GamePhase;
   readonly tick: number;
   readonly seed: number;
+  readonly loadouts: readonly [TrapLoadout, TrapLoadout];
   readonly players: readonly [PlayerState, PlayerState];
   readonly shots: readonly ShotState[];
   readonly traps: readonly TrapState[];

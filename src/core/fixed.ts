@@ -2,8 +2,10 @@ import {
   ARENA_HEIGHT_CELLS,
   ARENA_WIDTH_CELLS,
   CELL_UNITS,
+  DEFAULT_TRAP_LOADOUT,
   type InputCommand,
   type PlayerState,
+  type TrapLoadout,
   type TrapDirection,
   type TrapKind,
 } from './types.ts';
@@ -60,6 +62,7 @@ export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
   bomb: 2,
   moya: 1,
 };
+export const TRAP_LOADOUT_CHOICES: readonly TrapKind[] = ['shock', 'hatch', 'bomb', 'moya'];
 
 const MIN_X = PLAYER_RADIUS_UNITS;
 const MIN_Y = PLAYER_RADIUS_UNITS;
@@ -117,6 +120,21 @@ export function normalizeDirection(value: number | undefined): TrapDirection {
 
 export function isTrapKind(value: string | undefined): value is TrapKind {
   return value === 'bounce' || value === 'shock' || value === 'hatch' || value === 'bomb' || value === 'moya';
+}
+
+export function normalizeTrapLoadout(loadout: readonly TrapKind[] | undefined): TrapLoadout {
+  const selected = new Set<TrapKind>(loadout ?? []);
+  selected.add('bounce');
+  const result: TrapKind[] = ['bounce'];
+  for (const kind of TRAP_LOADOUT_CHOICES) {
+    if (result.length >= 3) break;
+    if (selected.has(kind)) result.push(kind);
+  }
+  for (const kind of DEFAULT_TRAP_LOADOUT) {
+    if (result.length >= 3) break;
+    if (!result.includes(kind)) result.push(kind);
+  }
+  return result as unknown as TrapLoadout;
 }
 
 export function snapToCell(value: number, maximumCells: number): number {

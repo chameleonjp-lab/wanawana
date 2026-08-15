@@ -28,6 +28,32 @@
           </select>
           <p id="difficulty-help" class="difficulty-help">反応、射撃の正確さ、連鎖の考え方だけが変わります。</p>
         </div>
+        <div class="loadout-choice">
+          <div class="loadout-heading">
+            <h3>罠ロードアウト</h3>
+            <p>ハネ板は固定。追加で2種類を選びます。</p>
+          </div>
+          <div class="loadout-slots">
+            <span class="loadout-slot loadout-slot-fixed">1&nbsp; ハネ板 <small>固定</small></span>
+            <label class="loadout-slot">2
+              <select id="loadout-slot-2" aria-label="2番目の罠">
+                <option value="shock" selected>ビリビリ盤</option>
+                <option value="hatch">パカット床</option>
+                <option value="bomb">ポン玉</option>
+                <option value="moya">モヤびん</option>
+              </select>
+            </label>
+            <label class="loadout-slot">3
+              <select id="loadout-slot-3" aria-label="3番目の罠">
+                <option value="shock">ビリビリ盤</option>
+                <option value="hatch" selected>パカット床</option>
+                <option value="bomb">ポン玉</option>
+                <option value="moya">モヤびん</option>
+              </select>
+            </label>
+          </div>
+          <p id="loadout-help" class="loadout-help">試合中は選んだ3種類だけ設置できます。</p>
+        </div>
         <button id="start-button" class="primary-button" type="button">舞台に入る</button>
       </section>
 
