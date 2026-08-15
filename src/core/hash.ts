@@ -87,6 +87,9 @@ export function serializeWorld(world: WorldState): string {
     world.phase,
     world.tick,
     world.seed,
+    (world.loadouts ?? [['bounce', 'shock', 'hatch'], ['bounce', 'shock', 'hatch']])
+      .map((loadout) => loadout.join(','))
+      .join('|'),
     world.nextEntityId,
     players,
     shots,

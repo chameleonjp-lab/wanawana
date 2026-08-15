@@ -12,6 +12,7 @@ import {
   ARENA_HEIGHT_CELLS,
   ARENA_WIDTH_CELLS,
   CELL_UNITS,
+  DEFAULT_TRAP_LOADOUT,
   type InputCommand,
   type TrapDirection,
   type TrapKind,
@@ -99,12 +100,18 @@ function hasDangerCue(
 }
 
 function chooseTrapKind(world: WorldState, chainPlanning: 1 | 2 | 3): TrapKind {
-  const cycle = Math.trunc(Math.max(0, world.tick - 45) / 180) % 5;
-  if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.bomb && cycle === 3) return 'bomb';
-  if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.moya && cycle === 4) return 'moya';
-  if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.hatch && cycle === 2) return 'hatch';
-  if (chainPlanning >= 2 && world.players[1].gear >= TRAP_COSTS.shock && cycle === 1) return 'shock';
-  return 'bounce';
+  const available = world.loadouts?.[1] ?? DEFAULT_TRAP_LOADOUT;
+  const plannedRoles: readonly TrapKind[] = chainPlanning >= 3
+    ? ['bounce', 'shock', 'hatch', 'bomb', 'moya']
+    : chainPlanning >= 2
+      ? ['bounce', 'shock']
+      : ['bounce'];
+  const cycle = Math.trunc(Math.max(0, world.tick - 45) / 180) % plannedRoles.length;
+  const preferred = plannedRoles[cycle];
+  if (available.includes(preferred) && world.players[1].gear >= TRAP_COSTS[preferred]) return preferred;
+  return plannedRoles.find((kind) => available.includes(kind) && world.players[1].gear >= TRAP_COSTS[kind])
+    ?? available[0]
+    ?? 'bounce';
 }
 
 function directionTowardCpu(cpu: WorldState['players'][number], target: WorldState['players'][number]): TrapDirection {

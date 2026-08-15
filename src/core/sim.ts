@@ -30,6 +30,7 @@ import {
   MOYA_EFFECT_TICKS,
   MOYA_RADIUS_UNITS,
   normalizeCommand,
+  normalizeTrapLoadout,
   PLAYER_RADIUS_UNITS,
   PUSH_IMMUNITY_TICKS,
   RESPAWN_INVULNERABLE_TICKS,
@@ -50,6 +51,7 @@ import {
   ARENA_HEIGHT_CELLS,
   ARENA_WIDTH_CELLS,
   CELL_UNITS,
+  DEFAULT_TRAP_LOADOUT,
   MATCH_TICKS,
   type InputCommand,
   type InvestigationState,
@@ -57,6 +59,7 @@ import {
   type PlacementState,
   type PlayerState,
   type ShotState,
+  type TrapKind,
   type TrapState,
   type TrapEvent,
   type WorldState,
@@ -83,11 +86,18 @@ function createPlayer(id: 0 | 1): PlayerState {
   };
 }
 
-export function createWorld(seed = 1): WorldState {
+export function createWorld(
+  seed = 1,
+  playerLoadout: readonly TrapKind[] = DEFAULT_TRAP_LOADOUT,
+  cpuLoadout: readonly TrapKind[] = DEFAULT_TRAP_LOADOUT,
+): WorldState {
+  const normalizedPlayerLoadout = normalizeTrapLoadout(playerLoadout);
+  const normalizedCpuLoadout = normalizeTrapLoadout(cpuLoadout);
   const world: WorldState = {
     phase: 'battle',
     tick: 0,
     seed: Math.trunc(seed) >>> 0,
+    loadouts: [normalizedPlayerLoadout, normalizedCpuLoadout],
     players: [createPlayer(0), createPlayer(1)],
     shots: [],
     traps: [],
@@ -142,6 +152,7 @@ function stepPlayer(
   command: InputCommand,
   target: PlayerState,
   traps: readonly TrapState[],
+  allowedTraps: readonly TrapKind[],
   shotId: number,
 ): PlayerStep {
   const gearState = recoverGear(player);
@@ -196,6 +207,7 @@ function stepPlayer(
   if (
     command.placeTrap
     && isTrapKind(command.placeTrap)
+    && allowedTraps.includes(command.placeTrap)
     && !player.investigation
     && player.gear >= TRAP_COSTS[command.placeTrap]
     && player.trapCooldownTicks === 0
@@ -875,6 +887,7 @@ export function advanceWorld(
     { x: world.players[0].x, y: world.players[0].y },
     { x: world.players[1].x, y: world.players[1].y },
   ];
+  const loadouts = world.loadouts ?? [DEFAULT_TRAP_LOADOUT, DEFAULT_TRAP_LOADOUT];
   let nextEntityId = world.nextEntityId;
   const preparedPlayers: readonly [PlayerState, PlayerState] = [
     {
@@ -886,9 +899,23 @@ export function advanceWorld(
       gasSlowTicks: gasSlowTicksFor(world.players[1], world.traps),
     },
   ];
-  const playerStep = stepPlayer(preparedPlayers[0], playerInput, preparedPlayers[1], world.traps, nextEntityId);
+  const playerStep = stepPlayer(
+    preparedPlayers[0],
+    playerInput,
+    preparedPlayers[1],
+    world.traps,
+    loadouts[0],
+    nextEntityId,
+  );
   if (playerStep.shot) nextEntityId += 1;
-  const cpuStep = stepPlayer(preparedPlayers[1], cpuInput, playerStep.player, world.traps, nextEntityId);
+  const cpuStep = stepPlayer(
+    preparedPlayers[1],
+    cpuInput,
+    playerStep.player,
+    world.traps,
+    loadouts[1],
+    nextEntityId,
+  );
   if (cpuStep.shot) nextEntityId += 1;
 
   const placementInProgress: readonly [boolean, boolean] = [
@@ -979,6 +1006,7 @@ export function advanceWorld(
     phase: result ? 'result' : world.phase,
     tick: nextTick,
     seed: world.seed,
+    loadouts,
     players: nextPlayers,
     shots: shotStep.shots,
     traps: nextTraps,
