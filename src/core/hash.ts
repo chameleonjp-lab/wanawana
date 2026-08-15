@@ -87,6 +87,7 @@ export function serializeWorld(world: WorldState): string {
     world.phase,
     world.tick,
     world.seed,
+    world.mapId ?? 'gearworks',
     (world.loadouts ?? [['bounce', 'shock', 'hatch'], ['bounce', 'shock', 'hatch']])
       .map((loadout) => loadout.join(','))
       .join('|'),

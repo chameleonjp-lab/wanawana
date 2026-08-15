@@ -48,15 +48,18 @@ import {
   TRAP_PLACEMENT_TICKS,
 } from './fixed.ts';
 import { hashWorld } from './hash.ts';
+import { getMapDefinition, spawnCellFor } from './maps.ts';
 import {
   ARENA_HEIGHT_CELLS,
   ARENA_WIDTH_CELLS,
   CELL_UNITS,
   DEFAULT_TRAP_LOADOUT,
+  DEFAULT_MAP_ID,
   MATCH_TICKS,
   type InputCommand,
   type InvestigationState,
   type MatchResult,
+  type MapId,
   type PlacementState,
   type PlayerState,
   type ShotState,
@@ -66,11 +69,12 @@ import {
   type WorldState,
 } from './types.ts';
 
-function createPlayer(id: 0 | 1): PlayerState {
+function createPlayer(id: 0 | 1, mapId: MapId): PlayerState {
+  const [spawnCellX, spawnCellY] = spawnCellFor(mapId, id);
   return {
     id,
-    x: (id === 0 ? 2 : 7) * CELL_UNITS,
-    y: 6 * CELL_UNITS,
+    x: spawnCellX * CELL_UNITS,
+    y: spawnCellY * CELL_UNITS,
     hp: 100,
     fireCooldownTicks: 0,
     fireSlowTicks: 0,
@@ -91,15 +95,18 @@ export function createWorld(
   seed = 1,
   playerLoadout: readonly TrapKind[] = DEFAULT_TRAP_LOADOUT,
   cpuLoadout: readonly TrapKind[] = DEFAULT_TRAP_LOADOUT,
+  mapId: MapId | string = DEFAULT_MAP_ID,
 ): WorldState {
   const normalizedPlayerLoadout = normalizeTrapLoadout(playerLoadout);
   const normalizedCpuLoadout = normalizeTrapLoadout(cpuLoadout);
+  const normalizedMapId = getMapDefinition(mapId).id;
   const world: WorldState = {
     phase: 'battle',
     tick: 0,
     seed: Math.trunc(seed) >>> 0,
+    mapId: normalizedMapId,
     loadouts: [normalizedPlayerLoadout, normalizedCpuLoadout],
-    players: [createPlayer(0), createPlayer(1)],
+    players: [createPlayer(0, normalizedMapId), createPlayer(1, normalizedMapId)],
     shots: [],
     traps: [],
     nextEntityId: 2,
@@ -144,8 +151,9 @@ function placementCellIsValid(
   return !(horizontalOverlap && verticalOverlap);
 }
 
-function spawnPosition(id: 0 | 1): { x: number; y: number } {
-  return { x: (id === 0 ? 2 : 7) * CELL_UNITS, y: 6 * CELL_UNITS };
+function spawnPosition(id: 0 | 1, mapId: MapId): { x: number; y: number } {
+  const [cellX, cellY] = spawnCellFor(mapId, id);
+  return { x: cellX * CELL_UNITS, y: cellY * CELL_UNITS };
 }
 
 function stepPlayer(
@@ -155,6 +163,7 @@ function stepPlayer(
   traps: readonly TrapState[],
   allowedTraps: readonly TrapKind[],
   shotId: number,
+  mapId: MapId,
 ): PlayerStep {
   const gearState = recoverGear(player);
   const timers = {
@@ -172,7 +181,7 @@ function stepPlayer(
   };
 
   if (player.disabledTicks > 0) {
-    const position = timers.disabledTicks === 0 ? spawnPosition(player.id) : { x: player.x, y: player.y };
+    const position = timers.disabledTicks === 0 ? spawnPosition(player.id, mapId) : { x: player.x, y: player.y };
     return {
       player: {
         ...player,
@@ -920,6 +929,7 @@ export function advanceWorld(
     { x: world.players[1].x, y: world.players[1].y },
   ];
   const loadouts = world.loadouts ?? [DEFAULT_TRAP_LOADOUT, DEFAULT_TRAP_LOADOUT];
+  const mapId = getMapDefinition(world.mapId ?? DEFAULT_MAP_ID).id;
   let nextEntityId = world.nextEntityId;
   const preparedPlayers: readonly [PlayerState, PlayerState] = [
     {
@@ -938,6 +948,7 @@ export function advanceWorld(
     world.traps,
     loadouts[0],
     nextEntityId,
+    mapId,
   );
   if (playerStep.shot) nextEntityId += 1;
   const cpuStep = stepPlayer(
@@ -947,6 +958,7 @@ export function advanceWorld(
     world.traps,
     loadouts[1],
     nextEntityId,
+    mapId,
   );
   if (cpuStep.shot) nextEntityId += 1;
 
@@ -1038,6 +1050,7 @@ export function advanceWorld(
     phase: result ? 'result' : world.phase,
     tick: nextTick,
     seed: world.seed,
+    mapId,
     loadouts,
     players: nextPlayers,
     shots: shotStep.shots,
