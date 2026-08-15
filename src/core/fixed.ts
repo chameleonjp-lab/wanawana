@@ -4,6 +4,7 @@ import {
   CELL_UNITS,
   DEFAULT_TRAP_LOADOUT,
   type InputCommand,
+  type ObstacleCell,
   type PlayerState,
   type TrapLoadout,
   type TrapDirection,
@@ -56,6 +57,7 @@ export const RESPAWN_INVULNERABLE_TICKS = 30;
 export const MAX_CHAIN_TRAPS = 8;
 export const MAX_EVENTS_PER_TICK = 128;
 export const MAX_EVENT_LOG = 50_000;
+const COLLISION_SEARCH_STEP_UNITS = 512;
 
 export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
   bounce: 1,
@@ -75,24 +77,89 @@ export function clampInteger(value: number, minimum: number, maximum: number): n
   return Math.min(maximum, Math.max(minimum, Math.trunc(value)));
 }
 
-export function applyMovement(player: PlayerState, command: InputCommand): PlayerState {
+export function circleIntersectsObstacle(
+  x: number,
+  y: number,
+  radius: number,
+  obstacles: readonly ObstacleCell[],
+): boolean {
+  return obstacles.some((obstacle) => {
+    const left = obstacle.cellX * CELL_UNITS;
+    const right = (obstacle.cellX + 1) * CELL_UNITS;
+    const top = obstacle.cellY * CELL_UNITS;
+    const bottom = (obstacle.cellY + 1) * CELL_UNITS;
+    const nearestX = clampInteger(x, left, right);
+    const nearestY = clampInteger(y, top, bottom);
+    const dx = x - nearestX;
+    const dy = y - nearestY;
+    return dx * dx + dy * dy <= radius * radius;
+  });
+}
+
+function moveAlongAxis(
+  x: number,
+  y: number,
+  delta: number,
+  axis: 'x' | 'y',
+  obstacles: readonly ObstacleCell[],
+): number {
+  const start = axis === 'x' ? x : y;
+  const target = clampInteger(
+    start + delta,
+    axis === 'x' ? MIN_X : MIN_Y,
+    axis === 'x' ? MAX_X : MAX_Y,
+  );
+  if (delta === 0 || obstacles.length === 0) return target;
+
+  const positionAt = (distance: number): { x: number; y: number } => ({
+    x: axis === 'x' ? start + Math.sign(delta) * distance : x,
+    y: axis === 'y' ? start + Math.sign(delta) * distance : y,
+  });
+  const targetPosition = positionAt(Math.abs(target - start));
+  if (!circleIntersectsObstacle(targetPosition.x, targetPosition.y, PLAYER_RADIUS_UNITS, obstacles)) return target;
+
+  let safeDistance = 0;
+  const blockedDistance = Math.abs(target - start);
+  for (let probe = COLLISION_SEARCH_STEP_UNITS; probe < blockedDistance; probe += COLLISION_SEARCH_STEP_UNITS) {
+    const position = positionAt(probe);
+    if (circleIntersectsObstacle(position.x, position.y, PLAYER_RADIUS_UNITS, obstacles)) break;
+    safeDistance = probe;
+  }
+
+  let low = safeDistance;
+  let high = blockedDistance;
+  for (let iteration = 0; iteration < 18 && high - low > 1; iteration += 1) {
+    const middle = Math.floor((low + high) / 2);
+    const position = positionAt(middle);
+    if (circleIntersectsObstacle(position.x, position.y, PLAYER_RADIUS_UNITS, obstacles)) high = middle;
+    else low = middle;
+  }
+  const safePosition = positionAt(low);
+  return axis === 'x' ? safePosition.x : safePosition.y;
+}
+
+export function movePlayerWithObstacles(
+  player: PlayerState,
+  deltaX: number,
+  deltaY: number,
+  obstacles: readonly ObstacleCell[] = [],
+): PlayerState {
+  const nextX = moveAlongAxis(player.x, player.y, deltaX, 'x', obstacles);
+  const nextY = moveAlongAxis(nextX, player.y, deltaY, 'y', obstacles);
+  return { ...player, x: nextX, y: nextY };
+}
+
+export function applyMovement(
+  player: PlayerState,
+  command: InputCommand,
+  obstacles: readonly ObstacleCell[] = [],
+): PlayerState {
   const speed = player.fireSlowTicks > 0
     ? PLAYER_SLOWED_SPEED_UNITS_PER_TICK
     : player.gasSlowTicks > 0
       ? MOYA_SLOWED_SPEED_UNITS_PER_TICK
       : PLAYER_SPEED_UNITS_PER_TICK;
-  const nextX = clampInteger(
-    player.x + command.moveX * speed,
-    MIN_X,
-    MAX_X,
-  );
-  const nextY = clampInteger(
-    player.y + command.moveY * speed,
-    MIN_Y,
-    MAX_Y,
-  );
-
-  return { ...player, x: nextX, y: nextY };
+  return movePlayerWithObstacles(player, command.moveX * speed, command.moveY * speed, obstacles);
 }
 
 export function normalizeAxis(value: number): -1 | 0 | 1 {
@@ -209,10 +276,83 @@ export function segmentHitsCircle(
   return left <= right;
 }
 
-export function applyPush(player: PlayerState, vx: number, vy: number): PlayerState {
-  return {
-    ...player,
-    x: clampInteger(player.x + Math.sign(vx) * SHOT_PUSH_UNITS, MIN_X, MAX_X),
-    y: clampInteger(player.y + Math.sign(vy) * SHOT_PUSH_UNITS, MIN_Y, MAX_Y),
-  };
+function orientation(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+function pointOnSegment(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  px: number,
+  py: number,
+): boolean {
+  return px >= Math.min(ax, bx) && px <= Math.max(ax, bx)
+    && py >= Math.min(ay, by) && py <= Math.max(ay, by);
+}
+
+function segmentsIntersect(
+  firstStartX: number,
+  firstStartY: number,
+  firstEndX: number,
+  firstEndY: number,
+  secondStartX: number,
+  secondStartY: number,
+  secondEndX: number,
+  secondEndY: number,
+): boolean {
+  const first = orientation(firstStartX, firstStartY, firstEndX, firstEndY, secondStartX, secondStartY);
+  const second = orientation(firstStartX, firstStartY, firstEndX, firstEndY, secondEndX, secondEndY);
+  const third = orientation(secondStartX, secondStartY, secondEndX, secondEndY, firstStartX, firstStartY);
+  const fourth = orientation(secondStartX, secondStartY, secondEndX, secondEndY, firstEndX, firstEndY);
+  if (((first > 0 && second < 0) || (first < 0 && second > 0))
+    && ((third > 0 && fourth < 0) || (third < 0 && fourth > 0))) return true;
+  if (first === 0 && pointOnSegment(firstStartX, firstStartY, firstEndX, firstEndY, secondStartX, secondStartY)) return true;
+  if (second === 0 && pointOnSegment(firstStartX, firstStartY, firstEndX, firstEndY, secondEndX, secondEndY)) return true;
+  if (third === 0 && pointOnSegment(secondStartX, secondStartY, secondEndX, secondEndY, firstStartX, firstStartY)) return true;
+  return fourth === 0 && pointOnSegment(secondStartX, secondStartY, secondEndX, secondEndY, firstEndX, firstEndY);
+}
+
+export function segmentHitsObstacle(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  obstacle: ObstacleCell,
+  padding = 0,
+): boolean {
+  const left = obstacle.cellX * CELL_UNITS - padding;
+  const right = (obstacle.cellX + 1) * CELL_UNITS + padding;
+  const top = obstacle.cellY * CELL_UNITS - padding;
+  const bottom = (obstacle.cellY + 1) * CELL_UNITS + padding;
+  if (Math.max(startX, endX) < left || Math.min(startX, endX) > right
+    || Math.max(startY, endY) < top || Math.min(startY, endY) > bottom) return false;
+  const inside = (x: number, y: number): boolean => x >= left && x <= right && y >= top && y <= bottom;
+  if (inside(startX, startY) || inside(endX, endY)) return true;
+  return segmentsIntersect(startX, startY, endX, endY, left, top, right, top)
+    || segmentsIntersect(startX, startY, endX, endY, right, top, right, bottom)
+    || segmentsIntersect(startX, startY, endX, endY, right, bottom, left, bottom)
+    || segmentsIntersect(startX, startY, endX, endY, left, bottom, left, top);
+}
+
+export function applyPush(
+  player: PlayerState,
+  vx: number,
+  vy: number,
+  obstacles: readonly ObstacleCell[] = [],
+): PlayerState {
+  return movePlayerWithObstacles(
+    player,
+    Math.sign(vx) * SHOT_PUSH_UNITS,
+    Math.sign(vy) * SHOT_PUSH_UNITS,
+    obstacles,
+  );
 }

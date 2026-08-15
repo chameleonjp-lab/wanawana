@@ -25,6 +25,14 @@ describe('deterministic maps', () => {
       expect(cpuSpawn[1]).toBeGreaterThanOrEqual(0);
       expect(cpuSpawn[1]).toBeLessThan(ARENA_HEIGHT_CELLS);
       expect(playerSpawn).not.toEqual(cpuSpawn);
+      for (const obstacle of map.obstacleCells) {
+        expect(obstacle.cellX).toBeGreaterThanOrEqual(0);
+        expect(obstacle.cellX).toBeLessThan(ARENA_WIDTH_CELLS);
+        expect(obstacle.cellY).toBeGreaterThanOrEqual(0);
+        expect(obstacle.cellY).toBeLessThan(ARENA_HEIGHT_CELLS);
+        expect(obstacle).not.toEqual({ cellX: playerSpawn[0], cellY: playerSpawn[1] });
+        expect(obstacle).not.toEqual({ cellX: cpuSpawn[0], cellY: cpuSpawn[1] });
+      }
       expect(map.name.length).toBeGreaterThan(0);
       expect(map.subtitle.length).toBeGreaterThan(0);
       signatures.add(`${playerSpawn.join(',')}:${cpuSpawn.join(',')}`);

@@ -36,6 +36,8 @@ import {
   PUSH_IMMUNITY_TICKS,
   RESPAWN_INVULNERABLE_TICKS,
   segmentHitsCircle,
+  segmentHitsObstacle,
+  movePlayerWithObstacles,
   SHOCK_PUSH_UNITS,
   SHOCK_RADIUS_UNITS,
   SHOT_RANGE_UNITS,
@@ -60,6 +62,7 @@ import {
   type InvestigationState,
   type MatchResult,
   type MapId,
+  type ObstacleCell,
   type PlacementState,
   type PlayerState,
   type ShotState,
@@ -142,7 +145,9 @@ function placementCellIsValid(
   traps: readonly TrapState[],
   cellX: number,
   cellY: number,
+  obstacles: readonly ObstacleCell[],
 ): boolean {
+  if (obstacles.some((obstacle) => obstacle.cellX === cellX && obstacle.cellY === cellY)) return false;
   if (traps.some((trap) => trap.owner === player.id && trap.cellX === cellX && trap.cellY === cellY)) return false;
   const trapX = cellCenterUnits(cellX);
   const trapY = cellCenterUnits(cellY);
@@ -164,6 +169,7 @@ function stepPlayer(
   allowedTraps: readonly TrapKind[],
   shotId: number,
   mapId: MapId,
+  obstacles: readonly ObstacleCell[],
 ): PlayerStep {
   const gearState = recoverGear(player);
   const timers = {
@@ -229,7 +235,7 @@ function stepPlayer(
     const cellY = Number.isInteger(command.trapCellY)
       ? Math.min(ARENA_HEIGHT_CELLS - 1, Math.max(0, command.trapCellY as number))
       : snapToCell(player.y, ARENA_HEIGHT_CELLS);
-    if (placementCellIsValid(player, target, traps, cellX, cellY)) {
+    if (placementCellIsValid(player, target, traps, cellX, cellY, obstacles)) {
       return {
         player: {
           ...player,
@@ -253,7 +259,7 @@ function stepPlayer(
     ...player,
     ...timers,
     fireSlowTicks: canFire ? FIRE_SLOW_TICKS : timers.fireSlowTicks,
-  }, command);
+  }, command, obstacles);
   if (!canFire) return { player: moved, shot: null, completedPlacement: null };
 
   const velocity = autoAimVelocity(moved.x, moved.y, target.x, target.y);
@@ -482,28 +488,30 @@ function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): Co
   return candidates[0] ?? null;
 }
 
-function clampPlayerCoordinate(value: number, maximum: number): number {
-  return Math.min(maximum - PLAYER_RADIUS_UNITS, Math.max(PLAYER_RADIUS_UNITS, Math.trunc(value)));
-}
-
-function moveByDirection(player: PlayerState, direction: 0 | 1 | 2 | 3, distance: number): PlayerState {
+function moveByDirection(
+  player: PlayerState,
+  direction: 0 | 1 | 2 | 3,
+  distance: number,
+  obstacles: readonly ObstacleCell[],
+): PlayerState {
   const vectors = [[0, -1], [1, 0], [0, 1], [-1, 0]] as const;
   const [dx, dy] = vectors[direction];
-  return {
-    ...player,
-    x: clampPlayerCoordinate(player.x + dx * distance, ARENA_WIDTH_CELLS * CELL_UNITS),
-    y: clampPlayerCoordinate(player.y + dy * distance, ARENA_HEIGHT_CELLS * CELL_UNITS),
-  };
+  return movePlayerWithObstacles(player, dx * distance, dy * distance, obstacles);
 }
 
-function moveAwayFromTrap(player: PlayerState, trap: TrapState, distance: number): PlayerState {
+function moveAwayFromTrap(
+  player: PlayerState,
+  trap: TrapState,
+  distance: number,
+  obstacles: readonly ObstacleCell[],
+): PlayerState {
   const dx = player.x - cellCenterUnits(trap.cellX);
   const dy = player.y - cellCenterUnits(trap.cellY);
-  if (dx === 0 && dy === 0) return moveByDirection(player, 0, distance);
+  if (dx === 0 && dy === 0) return moveByDirection(player, 0, distance, obstacles);
   if (Math.abs(dx) >= Math.abs(dy)) {
-    return moveByDirection(player, dx < 0 ? 3 : 1, distance);
+    return moveByDirection(player, dx < 0 ? 3 : 1, distance, obstacles);
   }
-  return moveByDirection(player, dy < 0 ? 0 : 2, distance);
+  return moveByDirection(player, dy < 0 ? 0 : 2, distance, obstacles);
 }
 
 function resolveTrapContacts(
@@ -515,6 +523,7 @@ function resolveTrapContacts(
   nextEventId: number,
   nextChainId: number,
   currentMaxChain: number,
+  obstacles: readonly ObstacleCell[],
 ): TrapResolution {
   const nextPlayers: [PlayerState, PlayerState] = [...players];
   let remainingTraps: readonly TrapState[] = traps;
@@ -612,7 +621,7 @@ function resolveTrapContacts(
 
     if (!protectedTarget) {
       if (trap.kind === 'bounce') {
-        nextPlayer = moveByDirection({ ...currentPlayer, placement: null, investigation: null }, trap.direction, BOUNCE_PUSH_UNITS);
+        nextPlayer = moveByDirection({ ...currentPlayer, placement: null, investigation: null }, trap.direction, BOUNCE_PUSH_UNITS, obstacles);
         pushX = nextPlayer.x - currentPlayer.x;
         pushY = nextPlayer.y - currentPlayer.y;
       } else if (trap.kind === 'shock') {
@@ -622,7 +631,7 @@ function resolveTrapContacts(
           hp: Math.max(0, currentPlayer.hp - damage),
           placement: null,
           investigation: null,
-        }, trap, SHOCK_PUSH_UNITS);
+        }, trap, SHOCK_PUSH_UNITS, obstacles);
         pushX = nextPlayer.x - currentPlayer.x;
         pushY = nextPlayer.y - currentPlayer.y;
       } else if (trap.kind === 'hatch') {
@@ -709,6 +718,7 @@ function resolveDelayedTrapEffects(
   nextChainId: number,
   currentMaxChain: number,
   existingEventCount: number,
+  obstacles: readonly ObstacleCell[],
 ): TrapResolution {
   const nextPlayers: [PlayerState, PlayerState] = [...players];
   let remainingTraps: readonly TrapState[] = traps;
@@ -766,7 +776,7 @@ function resolveDelayedTrapEffects(
           hp: Math.max(0, currentPlayer.hp - damage),
           placement: null,
           investigation: null,
-        }, bomb, BOMB_PUSH_UNITS);
+        }, bomb, BOMB_PUSH_UNITS, obstacles);
         pushX = nextPlayer.x - currentPlayer.x;
         pushY = nextPlayer.y - currentPlayer.y;
       }
@@ -845,6 +855,7 @@ function stepShots(
   shots: readonly ShotState[],
   players: readonly [PlayerState, PlayerState],
   placementInProgress: readonly [boolean, boolean],
+  obstacles: readonly ObstacleCell[],
 ): ShotStep {
   const nextPlayers: [PlayerState, PlayerState] = [...players];
   const nextShots: ShotState[] = [];
@@ -854,12 +865,20 @@ function stepShots(
   for (const shot of [...shots].sort((first, second) => first.id - second.id)) {
     const nextX = shot.x + shot.vx;
     const nextY = shot.y + shot.vy;
+    if (obstacles.some((obstacle) => segmentHitsObstacle(
+      shot.x,
+      shot.y,
+      nextX,
+      nextY,
+      obstacle,
+      SHOT_RADIUS_UNITS,
+    ))) continue;
     const targetId: 0 | 1 = shot.owner === 0 ? 1 : 0;
     const target = nextPlayers[targetId];
     const hit = target.disabledTicks === 0
       && segmentHitsCircle(shot.x, shot.y, nextX, nextY, target.x, target.y, PLAYER_RADIUS_UNITS + SHOT_RADIUS_UNITS);
     if (hit) {
-      const pushed = target.pushImmunityTicks === 0 ? applyPush(target, shot.vx, shot.vy) : target;
+      const pushed = target.pushImmunityTicks === 0 ? applyPush(target, shot.vx, shot.vy, obstacles) : target;
       pushedBy[targetId] = shot.owner;
       if (placementInProgress[targetId]) placementCancelled[targetId] = true;
       const investigation = target.investigation && pushed !== target
@@ -930,6 +949,7 @@ export function advanceWorld(
   ];
   const loadouts = world.loadouts ?? [DEFAULT_TRAP_LOADOUT, DEFAULT_TRAP_LOADOUT];
   const mapId = getMapDefinition(world.mapId ?? DEFAULT_MAP_ID).id;
+  const obstacles = getMapDefinition(mapId).obstacleCells;
   let nextEntityId = world.nextEntityId;
   const preparedPlayers: readonly [PlayerState, PlayerState] = [
     {
@@ -949,6 +969,7 @@ export function advanceWorld(
     loadouts[0],
     nextEntityId,
     mapId,
+    obstacles,
   );
   if (playerStep.shot) nextEntityId += 1;
   const cpuStep = stepPlayer(
@@ -959,6 +980,7 @@ export function advanceWorld(
     loadouts[1],
     nextEntityId,
     mapId,
+    obstacles,
   );
   if (cpuStep.shot) nextEntityId += 1;
 
@@ -974,6 +996,7 @@ export function advanceWorld(
     ],
     [playerStep.player, cpuStep.player],
     placementInProgress,
+    obstacles,
   );
 
   let traps: readonly TrapState[] = world.traps;
@@ -1008,6 +1031,7 @@ export function advanceWorld(
     world.nextEventId,
     world.nextChainId,
     world.maxChain,
+    obstacles,
   );
   player = trapStep.players[0];
   cpu = trapStep.players[1];
@@ -1021,6 +1045,7 @@ export function advanceWorld(
     trapStep.nextChainId,
     trapStep.maxChain,
     trapStep.events.length,
+    obstacles,
   );
   player = delayedTrapStep.players[0];
   cpu = delayedTrapStep.players[1];
