@@ -70,6 +70,7 @@ const loadoutSlot3 = getElement<HTMLSelectElement>('loadout-slot-3');
 const loadoutHelp = getElement<HTMLElement>('loadout-help');
 const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
 const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
+const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
 const controls = getElement<HTMLElement>('controls');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
@@ -141,7 +142,7 @@ function summaryHeadline(summary: MatchSummary): string {
 }
 
 function summaryDetail(summary: MatchSummary): string {
-  return `最高連鎖 ${summary.bestChain}段　罠設置 ${summary.trapsPlaced}　解除 ${summary.trapsDisarmed}　無効 ${summary.technicalInvalid}`;
+  return `最高連鎖 ${summary.bestChain}段　罠設置 ${summary.trapsPlaced}　解除 ${summary.trapsDisarmed}`;
 }
 
 function updateCareerSummary(): void {
@@ -168,6 +169,18 @@ function persistMatchSummary(): void {
   } catch {
     summaryStorageAvailable = false;
   }
+}
+
+function clearMatchSummary(): void {
+  if (!window.confirm('ワナワナの端末内戦績を削除しますか？')) return;
+  try {
+    window.localStorage.removeItem(SUMMARY_STORAGE_KEY);
+    summaryStorageAvailable = true;
+  } catch {
+    summaryStorageAvailable = false;
+  }
+  matchSummary = emptyMatchSummary();
+  updateCareerSummary();
 }
 
 function recordFinishedMatch(report: MatchReport): void {
@@ -603,6 +616,7 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('pause-button').addEventListener('click', () => pauseGame());
   getElement<HTMLButtonElement>('resume-button').addEventListener('click', resumeGame);
   soundButton.addEventListener('click', () => void soundEngine.toggle().then(updateSoundButton));
+  clearCareerSummaryButton.addEventListener('click', clearMatchSummary);
   difficultySelect.addEventListener('change', updateDifficultyLabel);
   loadoutSlot2.addEventListener('change', updateLoadoutLabel);
   loadoutSlot3.addEventListener('change', updateLoadoutLabel);

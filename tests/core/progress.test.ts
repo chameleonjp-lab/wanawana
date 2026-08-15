@@ -27,14 +27,13 @@ describe('terminal match summary', () => {
       wins: 1,
       losses: 0,
       draws: 0,
-      technicalInvalid: 0,
       bestChain: 4,
       trapsPlaced: 2,
       trapsDisarmed: 1,
     });
   });
 
-  it('counts draws and technical invalidation separately', () => {
+  it('counts draws and excludes technical invalidation from the saved record', () => {
     let summary = emptyMatchSummary();
     summary = recordMatchSummary(summary, {
       result: 'time-draw',
@@ -48,7 +47,8 @@ describe('terminal match summary', () => {
       trapsPlaced: 0,
       trapsDisarmed: 0,
     });
-    expect(summary).toMatchObject({ matches: 2, draws: 1, technicalInvalid: 1 });
+    expect(summary).toMatchObject({ matches: 1, draws: 1 });
+    expect(summary).not.toHaveProperty('technicalInvalid');
   });
 
   it('resets malformed, future, and out-of-range storage values', () => {

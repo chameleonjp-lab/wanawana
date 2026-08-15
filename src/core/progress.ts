@@ -9,7 +9,6 @@ export interface MatchSummary {
   readonly wins: number;
   readonly losses: number;
   readonly draws: number;
-  readonly technicalInvalid: number;
   readonly bestChain: number;
   readonly trapsPlaced: number;
   readonly trapsDisarmed: number;
@@ -29,7 +28,6 @@ export function emptyMatchSummary(): MatchSummary {
     wins: 0,
     losses: 0,
     draws: 0,
-    technicalInvalid: 0,
     bestChain: 0,
     trapsPlaced: 0,
     trapsDisarmed: 0,
@@ -51,14 +49,12 @@ function isSummary(value: unknown): value is MatchSummary {
     && isSafeCounter(candidate.wins)
     && isSafeCounter(candidate.losses)
     && isSafeCounter(candidate.draws)
-    && isSafeCounter(candidate.technicalInvalid)
     && isSafeCounter(candidate.bestChain)
     && isSafeCounter(candidate.trapsPlaced)
     && isSafeCounter(candidate.trapsDisarmed)
     && candidate.wins <= candidate.matches
     && candidate.losses <= candidate.matches
-    && candidate.draws <= candidate.matches
-    && candidate.technicalInvalid <= candidate.matches;
+    && candidate.draws <= candidate.matches;
 }
 
 export function readMatchSummary(raw: string | null | undefined): MatchSummary {
@@ -81,7 +77,7 @@ function addCounter(value: number, amount: number): number {
 }
 
 export function recordMatchSummary(summary: MatchSummary, input: MatchSummaryInput): MatchSummary {
-  if (!input.result) return summary;
+  if (!input.result || input.result === 'technical-invalid') return summary;
 
   const next: MatchSummary = {
     ...summary,
@@ -89,9 +85,6 @@ export function recordMatchSummary(summary: MatchSummary, input: MatchSummaryInp
     wins: input.result === 'player-win' ? addCounter(summary.wins, 1) : summary.wins,
     losses: input.result === 'cpu-win' ? addCounter(summary.losses, 1) : summary.losses,
     draws: input.result === 'draw' || input.result === 'time-draw' ? addCounter(summary.draws, 1) : summary.draws,
-    technicalInvalid: input.result === 'technical-invalid'
-      ? addCounter(summary.technicalInvalid, 1)
-      : summary.technicalInvalid,
     bestChain: isSafeCounter(input.maxChain) ? Math.max(summary.bestChain, input.maxChain) : summary.bestChain,
     trapsPlaced: addCounter(summary.trapsPlaced, input.trapsPlaced),
     trapsDisarmed: addCounter(summary.trapsDisarmed, input.trapsDisarmed),

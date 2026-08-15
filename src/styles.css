@@ -66,6 +66,7 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .career-summary h3 { margin: 0; color: #f7f1e7; font-size: .9rem; }
 .career-summary p { margin: 0; color: #cfc3df; font-size: .74rem; line-height: 1.5; }
 .career-summary p:first-of-type { color: #ffd37a; font-size: .92rem; font-weight: 800; }
+.career-summary-clear { justify-self: start; margin-top: 2px; padding: 0; min-height: 30px; font-size: .72rem; }
 
 .battle-screen { padding: clamp(14px, 3vw, 24px); }
 .battle-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
