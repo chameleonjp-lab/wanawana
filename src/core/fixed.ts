@@ -42,6 +42,8 @@ export const HATCH_DISABLED_TICKS = 48;
 /** Pon玉 arms on contact, then explodes after 0.75 seconds (45 fixed ticks). */
 export const BOMB_TRIGGER_TICKS = 45;
 export const BOMB_RADIUS_UNITS = Math.trunc(1.4 * CELL_UNITS);
+/** A bomb blast primes other armed bombs within the same 1.4-cell radius. */
+export const BOMB_CHAIN_RADIUS_UNITS = BOMB_RADIUS_UNITS;
 export const BOMB_CONTACT_RADIUS_UNITS = Math.trunc(0.7 * CELL_UNITS);
 export const BOMB_DAMAGE = 20;
 export const BOMB_PUSH_UNITS = Math.trunc(0.6 * CELL_UNITS);
