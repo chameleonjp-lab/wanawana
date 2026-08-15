@@ -16,7 +16,14 @@ import {
   normalizeTrapLoadout,
   snapToCell,
 } from './core/fixed.ts';
-import { buildMatchReport, chainHeading } from './core/result.ts';
+import { buildMatchReport, chainHeading, type MatchReport } from './core/result.ts';
+import {
+  emptyMatchSummary,
+  readMatchSummary,
+  recordMatchSummary,
+  serializeMatchSummary,
+  type MatchSummary,
+} from './core/progress.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import {
   ARENA_HEIGHT_CELLS,
@@ -50,6 +57,7 @@ const gearValue = getElement<HTMLElement>('gear-value');
 const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
 const resultDetails = getElement<HTMLElement>('result-details');
+const resultHistory = getElement<HTMLElement>('result-history');
 const resultHash = getElement<HTMLElement>('result-hash');
 const trapPreview = getElement<HTMLElement>('trap-preview');
 const inspectButton = getElement<HTMLButtonElement>('inspect-button');
@@ -60,8 +68,11 @@ const difficultyValue = getElement<HTMLElement>('difficulty-value');
 const loadoutSlot2 = getElement<HTMLSelectElement>('loadout-slot-2');
 const loadoutSlot3 = getElement<HTMLSelectElement>('loadout-slot-3');
 const loadoutHelp = getElement<HTMLElement>('loadout-help');
+const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
+const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const controls = getElement<HTMLElement>('controls');
 
+const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
 let pixiApp: Application | null = null;
 let world: WorldState | null = null;
 let frameId = 0;
@@ -69,6 +80,9 @@ let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
 let selectedLoadout: TrapLoadout = DEFAULT_TRAP_LOADOUT;
+let matchSummary: MatchSummary = emptyMatchSummary();
+let summaryStorageAvailable = true;
+let summaryRecordedWorld: WorldState | null = null;
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
 
@@ -120,6 +134,53 @@ function updateLoadoutLabel(): void {
   loadoutSlot2.value = selectedLoadout[1];
   loadoutSlot3.value = selectedLoadout[2];
   loadoutHelp.textContent = `試合中は${selectedLoadout.map(trapName).join('・')}だけ設置できます。`;
+}
+
+function summaryHeadline(summary: MatchSummary): string {
+  return `全${summary.matches}試合　${summary.wins}勝・${summary.losses}敗・${summary.draws}分`;
+}
+
+function summaryDetail(summary: MatchSummary): string {
+  return `最高連鎖 ${summary.bestChain}段　罠設置 ${summary.trapsPlaced}　解除 ${summary.trapsDisarmed}　無効 ${summary.technicalInvalid}`;
+}
+
+function updateCareerSummary(): void {
+  careerSummaryValue.textContent = summaryHeadline(matchSummary);
+  careerSummaryNote.textContent = summaryStorageAvailable
+    ? `${summaryDetail(matchSummary)}（この端末に保存）`
+    : `${summaryDetail(matchSummary)}（保存できないため、この画面を閉じると消えます）`;
+  resultHistory.textContent = `${summaryHeadline(matchSummary)}。${summaryDetail(matchSummary)}`;
+}
+
+function loadMatchSummary(): void {
+  try {
+    matchSummary = readMatchSummary(window.localStorage.getItem(SUMMARY_STORAGE_KEY));
+  } catch {
+    summaryStorageAvailable = false;
+    matchSummary = emptyMatchSummary();
+  }
+}
+
+function persistMatchSummary(): void {
+  if (!summaryStorageAvailable) return;
+  try {
+    window.localStorage.setItem(SUMMARY_STORAGE_KEY, serializeMatchSummary(matchSummary));
+  } catch {
+    summaryStorageAvailable = false;
+  }
+}
+
+function recordFinishedMatch(report: MatchReport): void {
+  if (!world || summaryRecordedWorld === world || !report.result) return;
+  matchSummary = recordMatchSummary(matchSummary, {
+    result: report.result,
+    maxChain: report.maxChain,
+    trapsPlaced: report.players[0].trapsPlaced,
+    trapsDisarmed: report.players[0].trapsDisarmed,
+  });
+  summaryRecordedWorld = world;
+  persistMatchSummary();
+  updateCareerSummary();
 }
 
 function updateTrapButtons(): void {
@@ -493,6 +554,7 @@ function finishBattle(): void {
   if (!world) return;
   machine.transition('result');
   const report = buildMatchReport(world);
+  recordFinishedMatch(report);
   resultSummary.textContent = `${report.resultLabel}。${world.tick}tickで試合を終えました。`;
   renderResultDetails();
   resultHash.textContent = world.lastHash;
@@ -511,6 +573,7 @@ async function startBattle(): Promise<void> {
   }
   inputController.setTrapLoadout(selectedLoadout);
   world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout);
+  summaryRecordedWorld = null;
   inputController.activate();
   machine.transition('battle');
   updateScreen();
@@ -568,10 +631,12 @@ function bindEvents(): void {
 }
 
 bindEvents();
+loadMatchSummary();
 updateScreen();
 updateSoundButton();
 updateDifficultyLabel();
 updateLoadoutLabel();
+updateCareerSummary();
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {
   machine.transition('unsupported');
