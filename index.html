@@ -54,6 +54,12 @@
           </div>
           <p id="loadout-help" class="loadout-help">試合中は選んだ3種類だけ設置できます。</p>
         </div>
+        <div id="career-summary" class="career-summary" aria-labelledby="career-summary-heading">
+          <h3 id="career-summary-heading">端末内の戦績</h3>
+          <p id="career-summary-value">全0試合　0勝・0敗・0分</p>
+          <p id="career-summary-note">最高連鎖 0段　罠設置 0　解除 0（この端末に保存）</p>
+          <button id="clear-career-summary" class="text-button career-summary-clear" type="button">この端末の記録を消す</button>
+        </div>
         <button id="start-button" class="primary-button" type="button">舞台に入る</button>
       </section>
 
@@ -122,6 +128,7 @@
         <h2 id="result-heading">試合を終えました</h2>
         <p id="result-summary">固定tickの試合が完了しました。</p>
         <div id="result-details" class="result-details" aria-live="polite"></div>
+        <p id="result-history" class="result-history">全0試合。最高連鎖 0段　罠設置 0　解除 0</p>
         <p class="result-hash">最終状態 <code id="result-hash">—</code></p>
         <button id="restart-button" class="primary-button" type="button">もう一度</button>
         <button id="result-title-button" class="text-button" type="button">タイトルへ戻る</button>

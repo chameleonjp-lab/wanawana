@@ -62,6 +62,11 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .loadout-slot-fixed { border-color: #8cbdff; }
 .loadout-slot small { color: #cfc3df; font-size: .62rem; font-weight: 500; }
 .loadout-help { margin: 0; color: #cfc3df; font-size: .72rem; }
+.career-summary { display: grid; gap: 4px; margin-top: 12px; padding: 14px; border: 1px solid #5a4c78; border-radius: 14px; background: #211a37; }
+.career-summary h3 { margin: 0; color: #f7f1e7; font-size: .9rem; }
+.career-summary p { margin: 0; color: #cfc3df; font-size: .74rem; line-height: 1.5; }
+.career-summary p:first-of-type { color: #ffd37a; font-size: .92rem; font-weight: 800; }
+.career-summary-clear { justify-self: start; margin-top: 2px; padding: 0; min-height: 30px; font-size: .72rem; }
 
 .battle-screen { padding: clamp(14px, 3vw, 24px); }
 .battle-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -105,6 +110,7 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .result-chains > li:first-child { margin-top: 0; }
 .result-chain-heading { display: block; color: #f7f1e7; font-weight: 800; }
 .result-chain-empty { margin: 0; color: #a99dbb; font-size: .78rem; }
+.result-history { margin: 0; padding: 12px 14px; border: 1px solid #5a4c78; border-radius: 14px; color: #cfc3df !important; background: #211a37; font-size: .78rem; }
 .result-hash { overflow-wrap: anywhere; font-size: .8rem; }
 code { color: #ffd37a; }
 
