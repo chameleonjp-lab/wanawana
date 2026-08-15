@@ -3,6 +3,7 @@ import {
   ARENA_WIDTH_CELLS,
   DEFAULT_MAP_ID,
   MAP_IDS,
+  type ObstacleCell,
   type MapId,
 } from './types.ts';
 
@@ -16,6 +17,7 @@ export interface MapDefinition {
   readonly gridColor: number;
   readonly accentColor: number;
   readonly landmark: 'gear' | 'crossroads' | 'ring';
+  readonly obstacleCells: readonly ObstacleCell[];
 }
 
 const MAP_DEFINITIONS: Readonly<Record<MapId, MapDefinition>> = {
@@ -29,6 +31,12 @@ const MAP_DEFINITIONS: Readonly<Record<MapId, MapDefinition>> = {
     gridColor: 0x3b2c54,
     accentColor: 0x8f70ad,
     landmark: 'gear',
+    obstacleCells: [
+      { cellX: 4, cellY: 3 },
+      { cellX: 4, cellY: 4 },
+      { cellX: 4, cellY: 8 },
+      { cellX: 4, cellY: 9 },
+    ],
   },
   crossroads: {
     id: 'crossroads',
@@ -40,6 +48,14 @@ const MAP_DEFINITIONS: Readonly<Record<MapId, MapDefinition>> = {
     gridColor: 0x2b5a55,
     accentColor: 0x6fd1c4,
     landmark: 'crossroads',
+    obstacleCells: [
+      { cellX: 4, cellY: 4 },
+      { cellX: 4, cellY: 5 },
+      { cellX: 3, cellY: 6 },
+      { cellX: 5, cellY: 6 },
+      { cellX: 4, cellY: 7 },
+      { cellX: 4, cellY: 8 },
+    ],
   },
   ring: {
     id: 'ring',
@@ -51,6 +67,18 @@ const MAP_DEFINITIONS: Readonly<Record<MapId, MapDefinition>> = {
     gridColor: 0x60482d,
     accentColor: 0xffb45f,
     landmark: 'ring',
+    obstacleCells: [
+      { cellX: 2, cellY: 4 },
+      { cellX: 3, cellY: 4 },
+      { cellX: 5, cellY: 4 },
+      { cellX: 6, cellY: 4 },
+      { cellX: 2, cellY: 8 },
+      { cellX: 3, cellY: 8 },
+      { cellX: 5, cellY: 8 },
+      { cellX: 6, cellY: 8 },
+      { cellX: 4, cellY: 3 },
+      { cellX: 4, cellY: 9 },
+    ],
   },
 };
 

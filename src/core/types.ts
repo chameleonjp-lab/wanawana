@@ -117,6 +117,11 @@ export interface WorldState {
   readonly lastHash: string;
 }
 
+export interface ObstacleCell {
+  readonly cellX: number;
+  readonly cellY: number;
+}
+
 export interface TrapEvent {
   readonly id: number;
   readonly tick: number;

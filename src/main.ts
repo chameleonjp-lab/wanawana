@@ -150,7 +150,7 @@ function updateMapLabel(): void {
   const map = getMapDefinition(requested);
   selectedMap = map.id;
   mapSelect.value = map.id;
-  mapHelp.textContent = `${map.subtitle}。開始位置と舞台の色が固定されます。`;
+  mapHelp.textContent = `${map.subtitle}。開始位置、壁、舞台の色が固定されます。`;
   stageEyebrow.textContent = `試作ステージ ／ ${map.id}`;
   battleHeading.textContent = map.name;
 }
@@ -307,6 +307,16 @@ function drawWorld(): void {
   }
   grid.stroke({ color: map.gridColor, alpha: 0.72, width: 1 });
   stage.addChild(grid);
+
+  for (const obstacle of map.obstacleCells) {
+    const wall = new Graphics();
+    const x = offsetX + obstacle.cellX * pixelsPerCell;
+    const y = offsetY + obstacle.cellY * pixelsPerCell;
+    wall.roundRect(x + pixelsPerCell * 0.08, y + pixelsPerCell * 0.08, pixelsPerCell * 0.84, pixelsPerCell * 0.84, pixelsPerCell * 0.12)
+      .fill({ color: map.accentColor, alpha: 0.32 })
+      .stroke({ color: map.accentColor, alpha: 0.76, width: 2 });
+    stage.addChild(wall);
+  }
 
   const landmark = new Graphics();
   const centerX = offsetX + (ARENA_WIDTH_CELLS * pixelsPerCell) / 2;
