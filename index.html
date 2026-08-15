@@ -28,6 +28,19 @@
           </select>
           <p id="difficulty-help" class="difficulty-help">反応、射撃の正確さ、連鎖の考え方だけが変わります。</p>
         </div>
+        <div class="map-choice">
+          <div class="map-heading">
+            <h3>舞台を選ぶ</h3>
+            <p>ルールは同じ、開始位置と色が変わります。</p>
+          </div>
+          <label for="map-select">面</label>
+          <select id="map-select">
+            <option value="gearworks" selected>大歯車劇場</option>
+            <option value="crossroads">四つ辻の舞台</option>
+            <option value="ring">輪の間</option>
+          </select>
+          <p id="map-help" class="map-help">歯車の中心で読み合う。開始位置と舞台の色が固定されます。</p>
+        </div>
         <div class="loadout-choice">
           <div class="loadout-heading">
             <h3>罠ロードアウト</h3>
@@ -72,7 +85,7 @@
       <section id="battle-view" class="screen battle-screen is-hidden" aria-labelledby="battle-heading">
         <div class="battle-heading-row">
           <div>
-            <p class="eyebrow">試作ステージ 01</p>
+            <p id="stage-eyebrow" class="eyebrow">試作ステージ ／ gearworks</p>
             <h2 id="battle-heading">大歯車劇場</h2>
           </div>
           <div class="battle-actions">

@@ -17,6 +17,7 @@ import {
   snapToCell,
 } from './core/fixed.ts';
 import { buildMatchReport, chainHeading, type MatchReport } from './core/result.ts';
+import { getMapDefinition } from './core/maps.ts';
 import {
   emptyMatchSummary,
   readMatchSummary,
@@ -29,6 +30,8 @@ import {
   ARENA_HEIGHT_CELLS,
   ARENA_WIDTH_CELLS,
   DEFAULT_TRAP_LOADOUT,
+  DEFAULT_MAP_ID,
+  type MapId,
   TICK_RATE,
   type CpuDifficulty,
   type InputCommand,
@@ -68,6 +71,10 @@ const difficultyValue = getElement<HTMLElement>('difficulty-value');
 const loadoutSlot2 = getElement<HTMLSelectElement>('loadout-slot-2');
 const loadoutSlot3 = getElement<HTMLSelectElement>('loadout-slot-3');
 const loadoutHelp = getElement<HTMLElement>('loadout-help');
+const mapSelect = getElement<HTMLSelectElement>('map-select');
+const mapHelp = getElement<HTMLElement>('map-help');
+const stageEyebrow = getElement<HTMLElement>('stage-eyebrow');
+const battleHeading = getElement<HTMLElement>('battle-heading');
 const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
 const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
@@ -81,6 +88,7 @@ let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
 let selectedLoadout: TrapLoadout = DEFAULT_TRAP_LOADOUT;
+let selectedMap: MapId = DEFAULT_MAP_ID;
 let matchSummary: MatchSummary = emptyMatchSummary();
 let summaryStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
@@ -135,6 +143,16 @@ function updateLoadoutLabel(): void {
   loadoutSlot2.value = selectedLoadout[1];
   loadoutSlot3.value = selectedLoadout[2];
   loadoutHelp.textContent = `試合中は${selectedLoadout.map(trapName).join('・')}だけ設置できます。`;
+}
+
+function updateMapLabel(): void {
+  const requested = mapSelect.value;
+  const map = getMapDefinition(requested);
+  selectedMap = map.id;
+  mapSelect.value = map.id;
+  mapHelp.textContent = `${map.subtitle}。開始位置と舞台の色が固定されます。`;
+  stageEyebrow.textContent = `試作ステージ ／ ${map.id}`;
+  battleHeading.textContent = map.name;
 }
 
 function summaryHeadline(summary: MatchSummary): string {
@@ -263,6 +281,7 @@ function readInput(): InputCommand {
 
 function drawWorld(): void {
   if (!pixiApp || !world) return;
+  const map = getMapDefinition(world.mapId);
   const width = Math.max(1, arena.clientWidth);
   const height = Math.max(1, arena.clientHeight);
   const pixelsPerCell = Math.min(width / ARENA_WIDTH_CELLS, height / ARENA_HEIGHT_CELLS);
@@ -274,7 +293,7 @@ function drawWorld(): void {
   }
 
   const background = new Graphics();
-  background.rect(0, 0, width, height).fill({ color: 0x0f0d1b });
+  background.rect(0, 0, width, height).fill({ color: map.backgroundColor });
   stage.addChild(background);
 
   const grid = new Graphics();
@@ -286,8 +305,30 @@ function drawWorld(): void {
     const y = offsetY + row * pixelsPerCell;
     grid.moveTo(offsetX, y).lineTo(offsetX + ARENA_WIDTH_CELLS * pixelsPerCell, y);
   }
-  grid.stroke({ color: 0x3b2c54, alpha: 0.72, width: 1 });
+  grid.stroke({ color: map.gridColor, alpha: 0.72, width: 1 });
   stage.addChild(grid);
+
+  const landmark = new Graphics();
+  const centerX = offsetX + (ARENA_WIDTH_CELLS * pixelsPerCell) / 2;
+  const centerY = offsetY + (ARENA_HEIGHT_CELLS * pixelsPerCell) / 2;
+  const landmarkRadius = pixelsPerCell * 1.65;
+  if (map.landmark === 'gear') {
+    landmark.circle(centerX, centerY, landmarkRadius).stroke({ color: map.accentColor, alpha: 0.22, width: 3 });
+    for (let spoke = 0; spoke < 8; spoke += 1) {
+      const angle = spoke * Math.PI / 4;
+      landmark.moveTo(centerX + Math.cos(angle) * landmarkRadius * 1.18, centerY + Math.sin(angle) * landmarkRadius * 1.18)
+        .lineTo(centerX + Math.cos(angle) * landmarkRadius * 1.55, centerY + Math.sin(angle) * landmarkRadius * 1.55);
+    }
+  } else if (map.landmark === 'crossroads') {
+    landmark.moveTo(centerX, offsetY).lineTo(centerX, offsetY + ARENA_HEIGHT_CELLS * pixelsPerCell);
+    landmark.moveTo(offsetX, centerY).lineTo(offsetX + ARENA_WIDTH_CELLS * pixelsPerCell, centerY);
+    landmark.circle(centerX, centerY, landmarkRadius * 0.62).stroke({ color: map.accentColor, alpha: 0.24, width: 3 });
+  } else {
+    landmark.circle(centerX, centerY, landmarkRadius * 2.15).stroke({ color: map.accentColor, alpha: 0.25, width: 3 });
+    landmark.circle(centerX, centerY, landmarkRadius * 0.72).stroke({ color: map.accentColor, alpha: 0.2, width: 2 });
+  }
+  landmark.stroke({ color: map.accentColor, alpha: 0.22, width: 2 });
+  stage.addChild(landmark);
 
   for (const trap of world.traps) {
     if (trap.owner === 1 && !trap.discoveredBy[0]) continue;
@@ -577,6 +618,7 @@ function finishBattle(): void {
 async function startBattle(): Promise<void> {
   updateDifficultyLabel();
   updateLoadoutLabel();
+  updateMapLabel();
   void soundEngine.resume().then(updateSoundButton);
   const ready = await ensurePixi();
   if (!ready) {
@@ -585,7 +627,7 @@ async function startBattle(): Promise<void> {
     return;
   }
   inputController.setTrapLoadout(selectedLoadout);
-  world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout);
+  world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout, selectedMap);
   summaryRecordedWorld = null;
   inputController.activate();
   machine.transition('battle');
@@ -620,6 +662,7 @@ function bindEvents(): void {
   difficultySelect.addEventListener('change', updateDifficultyLabel);
   loadoutSlot2.addEventListener('change', updateLoadoutLabel);
   loadoutSlot3.addEventListener('change', updateLoadoutLabel);
+  mapSelect.addEventListener('change', updateMapLabel);
   getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', returnToTitle);
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
@@ -650,6 +693,7 @@ updateScreen();
 updateSoundButton();
 updateDifficultyLabel();
 updateLoadoutLabel();
+updateMapLabel();
 updateCareerSummary();
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {

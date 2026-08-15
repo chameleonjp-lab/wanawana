@@ -12,6 +12,9 @@ export type TrapDirection = 0 | 1 | 2 | 3;
 export type InvestigationMode = 'reveal' | 'disarm';
 export type MatchResult = 'player-win' | 'cpu-win' | 'draw' | 'time-draw' | 'technical-invalid';
 export type CpuDifficulty = 'easy' | 'normal' | 'hard';
+export const MAP_IDS = ['gearworks', 'crossroads', 'ring'] as const;
+export type MapId = (typeof MAP_IDS)[number];
+export const DEFAULT_MAP_ID: MapId = 'gearworks';
 
 export interface PlacementState {
   readonly kind: TrapKind;
@@ -97,6 +100,7 @@ export interface WorldState {
   readonly phase: GamePhase;
   readonly tick: number;
   readonly seed: number;
+  readonly mapId: MapId;
   readonly loadouts: readonly [TrapLoadout, TrapLoadout];
   readonly players: readonly [PlayerState, PlayerState];
   readonly shots: readonly ShotState[];
