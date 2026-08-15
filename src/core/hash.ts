@@ -17,6 +17,7 @@ export function serializeWorld(world: WorldState): string {
     player.hp,
     player.fireCooldownTicks,
     player.fireSlowTicks,
+    player.gasSlowTicks,
     player.pushImmunityTicks,
     player.trapCooldownTicks,
     player.gear,
@@ -55,6 +56,12 @@ export function serializeWorld(world: WorldState): string {
       trap.armingTicks,
       trap.remainingTicks,
       trap.discoveredBy.join(''),
+      trap.triggerTicks ?? '-',
+      trap.effectTicks ?? '-',
+      trap.triggerParentEventId ?? '-',
+      trap.triggerChainId ?? '-',
+      trap.triggerChainLength ?? '-',
+      trap.triggerResponsibleActor ?? '-',
     ].join(','))
     .join('|');
   const events = [...world.events]

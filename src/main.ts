@@ -7,10 +7,10 @@ import {
   getCpuDifficultyProfile,
   normalizeCpuDifficulty,
 } from './core/difficulty.ts';
-import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
+import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, MOYA_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
 import { buildMatchReport, chainHeading } from './core/result.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
-import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, TICK_RATE, type CpuDifficulty, type InputCommand, type WorldState } from './core/types.ts';
+import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, TICK_RATE, type CpuDifficulty, type InputCommand, type TrapKind, type WorldState } from './core/types.ts';
 import { InputController } from './input/controller.ts';
 
 const FRAME_MS = 1_000 / 60;
@@ -83,7 +83,7 @@ function updateDifficultyLabel(): void {
   difficultyHelp.textContent = cpuDifficulty === 'easy'
     ? '反応がゆっくりで、射撃を外すことがあります。'
     : cpuDifficulty === 'hard'
-      ? '危険への反応が早く、3種類の罠を連鎖に使います。'
+      ? '危険への反応が早く、5種類の罠を連鎖に使います。'
       : '反応、射撃の正確さ、連鎖の考え方が標準です。';
 }
 
@@ -173,13 +173,25 @@ function drawWorld(): void {
     if (trap.owner === 1 && !trap.discoveredBy[0]) continue;
     const x = offsetX + cellToPixels(cellCenterUnits(trap.cellX), pixelsPerCell);
     const y = offsetY + cellToPixels(cellCenterUnits(trap.cellY), pixelsPerCell);
-    const color = trap.kind === 'bounce' ? 0x8cbdff : trap.kind === 'shock' ? 0xffdc73 : 0xff99c8;
+    const color = trapColor(trap.kind);
     const marker = new Graphics();
     const alpha = trap.armingTicks > 0 ? 0.45 : 0.9;
     marker.roundRect(x - pixelsPerCell * 0.28, y - pixelsPerCell * 0.28, pixelsPerCell * 0.56, pixelsPerCell * 0.56, pixelsPerCell * 0.12)
       .fill({ color, alpha })
       .stroke({ color: 0xffffff, alpha: 0.7, width: 1.5 });
     stage.addChild(marker);
+    if (trap.kind === 'bomb' && (trap.triggerTicks ?? 0) > 0) {
+      const fuse = new Graphics();
+      fuse.circle(x, y, pixelsPerCell * 0.38)
+        .stroke({ color: 0xff9b54, alpha: 0.95, width: 2 });
+      stage.addChild(fuse);
+    }
+    if (trap.kind === 'moya' && (trap.effectTicks ?? 0) > 0) {
+      const gas = new Graphics();
+      gas.circle(x, y, cellToPixels(MOYA_RADIUS_UNITS, pixelsPerCell))
+        .stroke({ color: 0x9ad7a5, alpha: 0.34, width: 2 });
+      stage.addChild(gas);
+    }
   }
 
   const player = world.players[0];
@@ -209,7 +221,7 @@ function drawWorld(): void {
     const eventX = offsetX + cellToPixels(event.x, pixelsPerCell);
     const eventY = offsetY + cellToPixels(event.y, pixelsPerCell);
     const marker = new Graphics();
-    const color = event.kind === 'bounce' ? 0x8cbdff : event.kind === 'shock' ? 0xffdc73 : 0xff99c8;
+    const color = trapColor(event.kind);
     marker.circle(eventX, eventY, Math.max(10, pixelsPerCell * (0.2 + age / 180)))
       .stroke({ color, alpha: Math.max(0.2, 1 - age / 30), width: 2 });
     stage.addChild(marker);
@@ -295,8 +307,20 @@ function hasDangerCue(
   });
 }
 
-function trapName(kind: 'bounce' | 'shock' | 'hatch'): string {
-  return kind === 'bounce' ? 'ハネ板' : kind === 'shock' ? 'ビリビリ盤' : 'パカット床';
+function trapColor(kind: TrapKind): number {
+  if (kind === 'bounce') return 0x8cbdff;
+  if (kind === 'shock') return 0xffdc73;
+  if (kind === 'hatch') return 0xff99c8;
+  if (kind === 'bomb') return 0xff9b54;
+  return 0x9ad7a5;
+}
+
+function trapName(kind: TrapKind): string {
+  if (kind === 'bounce') return 'ハネ板';
+  if (kind === 'shock') return 'ビリビリ盤';
+  if (kind === 'hatch') return 'パカット床';
+  if (kind === 'bomb') return 'ポン玉';
+  return 'モヤびん';
 }
 
 function startLoop(): void {

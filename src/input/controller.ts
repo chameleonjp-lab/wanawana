@@ -17,7 +17,13 @@ interface TrapCell {
 }
 
 const MOVE_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd']);
-const TRAP_KEYS = new Map<string, TrapKind>([['1', 'bounce'], ['2', 'shock'], ['3', 'hatch']]);
+const TRAP_KEYS = new Map<string, TrapKind>([
+  ['1', 'bounce'],
+  ['2', 'shock'],
+  ['3', 'hatch'],
+  ['4', 'bomb'],
+  ['5', 'moya'],
+]);
 const FIRE_KEY = ' ';
 const INSPECT_KEY = 'e';
 const DEAD_ZONE = 0.2;
@@ -145,7 +151,13 @@ export class InputController {
   private roleFromTarget(target: HTMLElement): { role: PointerRole; trapKind?: TrapKind } | null {
     const rawRole = target.dataset.inputRole;
     if (rawRole === 'move' || rawRole === 'fire' || rawRole === 'inspect') return { role: rawRole };
-    if (rawRole === 'trap-bounce' || rawRole === 'trap-shock' || rawRole === 'trap-hatch') {
+    if (
+      rawRole === 'trap-bounce'
+      || rawRole === 'trap-shock'
+      || rawRole === 'trap-hatch'
+      || rawRole === 'trap-bomb'
+      || rawRole === 'trap-moya'
+    ) {
       return { role: 'trap', trapKind: rawRole.slice(5) as TrapKind };
     }
     return null;

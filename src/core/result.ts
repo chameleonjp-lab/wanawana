@@ -31,7 +31,9 @@ export interface MatchReport {
 function trapLabel(kind: TrapKind): string {
   if (kind === 'bounce') return 'ハネ板';
   if (kind === 'shock') return 'ビリビリ盤';
-  return 'パカット床';
+  if (kind === 'hatch') return 'パカット床';
+  if (kind === 'bomb') return 'ポン玉';
+  return 'モヤびん';
 }
 
 function targetLabel(target: 0 | 1): string {

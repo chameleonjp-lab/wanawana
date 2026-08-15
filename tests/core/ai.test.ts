@@ -139,4 +139,10 @@ describe('deterministic CPU cognition', () => {
     expect(chooseCpuDecision(terminal, 'normal').command.placeTrap).toBe('bounce');
     expect(chooseCpuDecision(terminal, 'hard').command.placeTrap).toBe('hatch');
   });
+
+  it('lets hard planning reach the delayed and field trap roles', () => {
+    const base = createWorld(2034);
+    expect(chooseCpuDecision({ ...base, tick: 585 }, 'hard').command.placeTrap).toBe('bomb');
+    expect(chooseCpuDecision({ ...base, tick: 765 }, 'hard').command.placeTrap).toBe('moya');
+  });
 });

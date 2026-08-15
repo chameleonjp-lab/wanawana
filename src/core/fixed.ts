@@ -37,6 +37,17 @@ export const SHOCK_RADIUS_UNITS = Math.trunc(0.55 * CELL_UNITS);
 export const SHOCK_PUSH_UNITS = Math.trunc(0.6 * CELL_UNITS);
 export const HATCH_RADIUS_UNITS = Math.trunc(0.45 * CELL_UNITS);
 export const HATCH_DISABLED_TICKS = 48;
+/** Pon玉 arms on contact, then explodes after 0.75 seconds (45 fixed ticks). */
+export const BOMB_TRIGGER_TICKS = 45;
+export const BOMB_RADIUS_UNITS = Math.trunc(1.4 * CELL_UNITS);
+export const BOMB_CONTACT_RADIUS_UNITS = Math.trunc(0.7 * CELL_UNITS);
+export const BOMB_DAMAGE = 20;
+export const BOMB_PUSH_UNITS = Math.trunc(0.6 * CELL_UNITS);
+/** モヤびん slows movement inside a 1.5-cell gas field for 3.5 seconds. */
+export const MOYA_CONTACT_RADIUS_UNITS = Math.trunc(0.6 * CELL_UNITS);
+export const MOYA_RADIUS_UNITS = Math.trunc(1.5 * CELL_UNITS);
+export const MOYA_EFFECT_TICKS = 210;
+export const MOYA_SLOWED_SPEED_UNITS_PER_TICK = Math.trunc(PLAYER_SPEED_UNITS_PER_TICK * 0.7);
 export const RESPAWN_INVULNERABLE_TICKS = 30;
 export const MAX_CHAIN_TRAPS = 8;
 export const MAX_EVENTS_PER_TICK = 128;
@@ -46,6 +57,8 @@ export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
   bounce: 1,
   shock: 2,
   hatch: 2,
+  bomb: 2,
+  moya: 1,
 };
 
 const MIN_X = PLAYER_RADIUS_UNITS;
@@ -60,7 +73,9 @@ export function clampInteger(value: number, minimum: number, maximum: number): n
 export function applyMovement(player: PlayerState, command: InputCommand): PlayerState {
   const speed = player.fireSlowTicks > 0
     ? PLAYER_SLOWED_SPEED_UNITS_PER_TICK
-    : PLAYER_SPEED_UNITS_PER_TICK;
+    : player.gasSlowTicks > 0
+      ? MOYA_SLOWED_SPEED_UNITS_PER_TICK
+      : PLAYER_SPEED_UNITS_PER_TICK;
   const nextX = clampInteger(
     player.x + command.moveX * speed,
     MIN_X,
@@ -101,7 +116,7 @@ export function normalizeDirection(value: number | undefined): TrapDirection {
 }
 
 export function isTrapKind(value: string | undefined): value is TrapKind {
-  return value === 'bounce' || value === 'shock' || value === 'hatch';
+  return value === 'bounce' || value === 'shock' || value === 'hatch' || value === 'bomb' || value === 'moya';
 }
 
 export function snapToCell(value: number, maximumCells: number): number {

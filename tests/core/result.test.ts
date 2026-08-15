@@ -35,7 +35,9 @@ describe('match result report', () => {
       events: [
         event({ id: 3, chainId: 5, chainLength: 2, kind: 'shock', damage: 18, target: 1, parentEventId: 2 }),
         event({ id: 1, chainId: 4 }),
-        event({ id: 2, chainId: 4, chainLength: 2, kind: 'hatch', damage: 26, pushX: 0, parentEventId: 1 }),
+      event({ id: 2, chainId: 4, chainLength: 2, kind: 'hatch', damage: 26, pushX: 0, parentEventId: 1 }),
+      event({ id: 4, chainId: 6, kind: 'bomb', damage: 20, target: 0 }),
+      event({ id: 5, chainId: 7, kind: 'moya', target: 1 }),
       ],
       maxChain: 2,
       shotsFired: [2, 3],
@@ -46,12 +48,14 @@ describe('match result report', () => {
     const report = buildMatchReport(world);
     expect(report.resultLabel).toBe('あなたの勝ち');
     expect(report.resultReason).toBe('CPUの体力が0になりました。');
-    expect(report.eventCount).toBe(3);
-    expect(report.chains).toHaveLength(2);
+    expect(report.eventCount).toBe(5);
+    expect(report.chains).toHaveLength(4);
     expect(report.chains[0].eventIds).toEqual([1, 2]);
     expect(report.chains[0].damage).toBe(26);
     expect(report.chains[0].description).toContain('ハネ板');
     expect(report.chains[0].description).toContain('パカット床');
+    expect(report.chains[2].description).toContain('ポン玉');
+    expect(report.chains[3].description).toContain('モヤびん');
     expect(chainHeading(report.chains[1])).toBe('連鎖5・2段・CPUの仕掛け');
   });
 
