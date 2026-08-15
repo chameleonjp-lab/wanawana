@@ -8,6 +8,7 @@ import {
 } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 import {
+  BOMB_CHAIN_RADIUS_UNITS,
   BOMB_DAMAGE,
   BOMB_TRIGGER_TICKS,
   DISARM_TICKS,
@@ -394,6 +395,63 @@ describe('fixed simulation', () => {
     expect(world.traps).toHaveLength(0);
     expect(world.events).toHaveLength(1);
     expect(world.events[0]).toMatchObject({ kind: 'bomb', damage: BOMB_DAMAGE, chainLength: 1 });
+  });
+
+  it('primes a nearby armed bomb and preserves the delayed chain context', () => {
+    const base = createWorld(183);
+    const bombs: TrapState[] = [
+      {
+        id: 2,
+        owner: 1,
+        kind: 'bomb',
+        direction: 0,
+        cellX: 3,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+      {
+        id: 3,
+        owner: 1,
+        kind: 'bomb',
+        direction: 0,
+        cellX: 4,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+    ];
+    expect(BOMB_CHAIN_RADIUS_UNITS).toBeGreaterThan(9_600);
+    let world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 28_288 }, base.players[1]],
+      traps: bombs,
+      nextEntityId: 4,
+    };
+
+    world = advanceWorld(world, { moveX: 1 });
+    for (let tick = 0; tick < BOMB_TRIGGER_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+    const primed = world.traps.find((trap) => trap.id === 3);
+    expect(world.events[0]).toMatchObject({ trapId: 2, chainLength: 1 });
+    expect(primed?.triggerTicks).toBe(BOMB_TRIGGER_TICKS - 1);
+    expect(primed?.triggerParentEventId).toBe(world.events[0].id);
+    expect(primed?.triggerChainId).toBe(world.events[0].chainId);
+    expect(primed?.triggerChainLength).toBe(1);
+
+    for (let tick = 0; tick < BOMB_TRIGGER_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+    expect(world.events[1]).toMatchObject({
+      trapId: 3,
+      parentEventId: world.events[0].id,
+      chainId: world.events[0].chainId,
+      chainLength: 2,
+    });
+    expect(world.maxChain).toBe(2);
   });
 
   it('slows movement only while a モヤびん field is active', () => {

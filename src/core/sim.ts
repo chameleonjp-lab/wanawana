@@ -2,6 +2,7 @@ import {
   applyMovement,
   applyPush,
   autoAimVelocity,
+  BOMB_CHAIN_RADIUS_UNITS,
   BOUNCE_PUSH_UNITS,
   BOMB_CONTACT_RADIUS_UNITS,
   BOMB_DAMAGE,
@@ -722,23 +723,34 @@ function resolveDelayedTrapEffects(
     const responsibleActor = bomb.triggerResponsibleActor ?? bomb.owner;
     if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
     maxChain = Math.max(maxChain, eventChainLength);
+    let explosionEventId: number | null = null;
 
-    for (const targetId of [0, 1] as const) {
+    const distanceSquaredToCenter = (targetId: 0 | 1): number => {
+      const dx = nextPlayers[targetId].x - centerX;
+      const dy = nextPlayers[targetId].y - centerY;
+      return dx * dx + dy * dy;
+    };
+    const blastTargets = ([0, 1] as const).filter(
+      (targetId) => distanceSquaredToCenter(targetId) <= BOMB_RADIUS_UNITS * BOMB_RADIUS_UNITS,
+    );
+    const eventTargets: readonly (0 | 1)[] = blastTargets.length > 0
+      ? blastTargets
+      : ([0, 1] as (0 | 1)[]).sort((first, second) => distanceSquaredToCenter(first) - distanceSquaredToCenter(second) || first - second).slice(0, 1);
+
+    for (const targetId of eventTargets) {
       const currentPlayer = nextPlayers[targetId];
-      const dx = currentPlayer.x - centerX;
-      const dy = currentPlayer.y - centerY;
-      if (dx * dx + dy * dy > BOMB_RADIUS_UNITS * BOMB_RADIUS_UNITS) continue;
       if (existingEventCount + events.length >= MAX_EVENTS_PER_TICK) {
         technicalInvalid = true;
         break;
       }
 
+      const inBlast = blastTargets.includes(targetId);
       const protectedTarget = currentPlayer.respawnInvulnerableTicks > 0;
       let nextPlayer = currentPlayer;
       let damage = 0;
       let pushX = 0;
       let pushY = 0;
-      if (!protectedTarget) {
+      if (inBlast && !protectedTarget) {
         damage = BOMB_DAMAGE;
         nextPlayer = moveAwayFromTrap({
           ...currentPlayer,
@@ -750,7 +762,7 @@ function resolveDelayedTrapEffects(
         pushY = nextPlayer.y - currentPlayer.y;
       }
 
-      events.push({
+      const event: TrapEvent = {
         id: eventId,
         tick,
         chainId: eventChainId,
@@ -766,13 +778,33 @@ function resolveDelayedTrapEffects(
         damage,
         pushX,
         pushY,
-      });
+      };
+      if (explosionEventId === null) explosionEventId = event.id;
+      events.push(event);
       eventId += 1;
       nextPlayers[targetId] = nextPlayer;
       if (eventChainLength > MAX_CHAIN_TRAPS || existingEventCount + events.length >= MAX_EVENT_LOG) {
         technicalInvalid = true;
         break;
       }
+    }
+    if (!technicalInvalid && explosionEventId !== null) {
+      const chainRadiusSquared = BOMB_CHAIN_RADIUS_UNITS * BOMB_CHAIN_RADIUS_UNITS;
+      const primedBombs = remainingTraps.map((current) => {
+        if (current.kind !== 'bomb' || current.armingTicks > 0 || (current.triggerTicks ?? 0) > 0) return current;
+        const dx = cellCenterUnits(current.cellX) - centerX;
+        const dy = cellCenterUnits(current.cellY) - centerY;
+        if (dx * dx + dy * dy > chainRadiusSquared) return current;
+        return {
+          ...current,
+          triggerTicks: BOMB_TRIGGER_TICKS,
+          triggerParentEventId: explosionEventId,
+          triggerChainId: eventChainId,
+          triggerChainLength: eventChainLength,
+          triggerResponsibleActor: responsibleActor,
+        };
+      });
+      remainingTraps = primedBombs;
     }
     if (technicalInvalid) break;
   }
