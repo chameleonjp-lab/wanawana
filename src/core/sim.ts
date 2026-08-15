@@ -3,6 +3,11 @@ import {
   applyPush,
   autoAimVelocity,
   BOUNCE_PUSH_UNITS,
+  BOMB_CONTACT_RADIUS_UNITS,
+  BOMB_DAMAGE,
+  BOMB_PUSH_UNITS,
+  BOMB_RADIUS_UNITS,
+  BOMB_TRIGGER_TICKS,
   cellCenterUnits,
   DISARM_RADIUS_UNITS,
   DISARM_TICKS,
@@ -21,6 +26,9 @@ import {
   MAX_CHAIN_TRAPS,
   MAX_EVENTS_PER_TICK,
   MAX_EVENT_LOG,
+  MOYA_CONTACT_RADIUS_UNITS,
+  MOYA_EFFECT_TICKS,
+  MOYA_RADIUS_UNITS,
   normalizeCommand,
   PLAYER_RADIUS_UNITS,
   PUSH_IMMUNITY_TICKS,
@@ -62,6 +70,7 @@ function createPlayer(id: 0 | 1): PlayerState {
     hp: 100,
     fireCooldownTicks: 0,
     fireSlowTicks: 0,
+    gasSlowTicks: 0,
     pushImmunityTicks: 0,
     trapCooldownTicks: 0,
     gear: GEAR_START,
@@ -139,6 +148,9 @@ function stepPlayer(
   const timers = {
     fireCooldownTicks: Math.max(0, player.fireCooldownTicks - 1),
     fireSlowTicks: Math.max(0, player.fireSlowTicks - 1),
+    // This field is refreshed from active gas fields at the start of each tick;
+    // unlike fireSlowTicks it is not an independent countdown.
+    gasSlowTicks: Math.max(0, player.gasSlowTicks ?? 0),
     pushImmunityTicks: Math.max(0, player.pushImmunityTicks - 1),
     trapCooldownTicks: Math.max(0, player.trapCooldownTicks - 1),
     investigationPauseTicks: Math.max(0, player.investigationPauseTicks - 1),
@@ -249,6 +261,8 @@ function createTrap(owner: 0 | 1, id: number, placement: PlacementState): TrapSt
     armingTicks: TRAP_ARMING_TICKS,
     remainingTicks: TRAP_LIFETIME_TICKS,
     discoveredBy: owner === 0 ? [true, false] : [false, true],
+    triggerTicks: 0,
+    effectTicks: 0,
   };
 }
 
@@ -373,12 +387,20 @@ function stepInvestigation(
 
 function advanceTrapTimers(traps: readonly TrapState[]): readonly TrapState[] {
   return traps
-    .map((trap) => ({
-      ...trap,
-      armingTicks: Math.max(0, trap.armingTicks - 1),
-      remainingTicks: trap.armingTicks > 0 ? trap.remainingTicks : Math.max(0, trap.remainingTicks - 1),
-    }))
-    .filter((trap) => trap.remainingTicks > 0);
+    .flatMap((trap) => {
+      const nextEffectTicks = trap.effectTicks === undefined
+        ? undefined
+        : Math.max(0, trap.effectTicks - 1);
+      if (trap.kind === 'moya' && (trap.effectTicks ?? 0) > 0 && nextEffectTicks === 0) return [];
+      const nextTrap: TrapState = {
+        ...trap,
+        armingTicks: Math.max(0, trap.armingTicks - 1),
+        remainingTicks: trap.armingTicks > 0 ? trap.remainingTicks : Math.max(0, trap.remainingTicks - 1),
+        ...(trap.triggerTicks === undefined ? {} : { triggerTicks: Math.max(0, trap.triggerTicks - 1) }),
+        ...(nextEffectTicks === undefined ? {} : { effectTicks: nextEffectTicks }),
+      };
+      return nextTrap.remainingTicks > 0 ? [nextTrap] : [];
+    });
 }
 
 interface TrapSegment {
@@ -410,13 +432,15 @@ interface TrapResolution {
 function trapContactRadius(trap: TrapState): number {
   if (trap.kind === 'bounce') return CELL_UNITS / 2;
   if (trap.kind === 'shock') return SHOCK_RADIUS_UNITS;
-  return HATCH_RADIUS_UNITS;
+  if (trap.kind === 'hatch') return HATCH_RADIUS_UNITS;
+  if (trap.kind === 'bomb') return BOMB_CONTACT_RADIUS_UNITS;
+  return MOYA_CONTACT_RADIUS_UNITS;
 }
 
 function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): ContactCandidate | null {
   const candidates: ContactCandidate[] = [];
   for (const trap of traps) {
-    if (trap.armingTicks > 0) continue;
+    if (trap.armingTicks > 0 || (trap.triggerTicks ?? 0) > 0 || (trap.effectTicks ?? 0) > 0) continue;
     const centerX = cellCenterUnits(trap.cellX);
     const centerY = cellCenterUnits(trap.cellY);
     if (!segmentHitsCircle(
@@ -519,12 +543,40 @@ function resolveTrapContacts(
     const segment = segments[targetId];
     if (!segment) break;
     const trap = candidate.trap;
-    remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
     const parentEventId = segment.parentEventId;
     const eventChainId = segment.chainId ?? chainId++;
     const eventChainLength = segment.chainLength + 1;
     if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
     maxChain = Math.max(maxChain, eventChainLength);
+
+    // Pon玉 is consumed by contact, but its event is intentionally delayed until
+    // the fuse expires. Store the chain context so replay never has to infer it.
+    if (trap.kind === 'bomb' && (trap.triggerTicks ?? 0) === 0) {
+      remainingTraps = remainingTraps.map((current) => current.id === trap.id
+        ? {
+          ...current,
+          triggerTicks: BOMB_TRIGGER_TICKS,
+          triggerParentEventId: parentEventId,
+          triggerChainId: eventChainId,
+          triggerChainLength: segment.chainLength,
+          triggerResponsibleActor: parentEventId === null
+            ? segment.sourceActor
+            : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor),
+        }
+        : current);
+      segments[targetId] = null;
+      continue;
+    }
+
+    // モヤびん remains as a field while active, but can only be triggered once.
+    const moyaActivation = trap.kind === 'moya' && (trap.effectTicks ?? 0) === 0;
+    if (moyaActivation) {
+      remainingTraps = remainingTraps.map((current) => current.id === trap.id
+        ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
+        : current);
+    } else {
+      remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
+    }
 
     const currentPlayer = nextPlayers[targetId];
     const eventX = currentPlayer.x;
@@ -551,7 +603,7 @@ function resolveTrapContacts(
         }, trap, SHOCK_PUSH_UNITS);
         pushX = nextPlayer.x - currentPlayer.x;
         pushY = nextPlayer.y - currentPlayer.y;
-      } else {
+      } else if (trap.kind === 'hatch') {
         damage = 26;
         nextPlayer = {
           ...currentPlayer,
@@ -561,6 +613,15 @@ function resolveTrapContacts(
           investigation: null,
         };
       }
+    }
+
+    if (moyaActivation) {
+      nextPlayer = {
+        ...nextPlayer,
+        placement: null,
+        investigation: null,
+        gasSlowTicks: MOYA_EFFECT_TICKS - 1,
+      };
     }
 
     const event: TrapEvent = {
@@ -606,6 +667,104 @@ function resolveTrapContacts(
   }
 
   if (events.length >= MAX_EVENTS_PER_TICK) technicalInvalid = true;
+  return {
+    players: nextPlayers,
+    traps: remainingTraps,
+    events,
+    nextEventId: eventId,
+    nextChainId: chainId,
+    maxChain,
+    technicalInvalid,
+  };
+}
+
+/** Resolve fuse-driven bombs after all ordinary movement and contact chains. */
+function resolveDelayedTrapEffects(
+  tick: number,
+  players: readonly [PlayerState, PlayerState],
+  traps: readonly TrapState[],
+  nextEventId: number,
+  nextChainId: number,
+  currentMaxChain: number,
+  existingEventCount: number,
+): TrapResolution {
+  const nextPlayers: [PlayerState, PlayerState] = [...players];
+  let remainingTraps: readonly TrapState[] = traps;
+  const events: TrapEvent[] = [];
+  let eventId = nextEventId;
+  let chainId = nextChainId;
+  let maxChain = currentMaxChain;
+  let technicalInvalid = false;
+
+  const dueBombs = traps
+    .filter((trap) => trap.kind === 'bomb' && (trap.triggerTicks ?? 0) === 1)
+    .sort((first, second) => first.id - second.id);
+
+  for (const bomb of dueBombs) {
+    remainingTraps = remainingTraps.filter((trap) => trap.id !== bomb.id);
+    const centerX = cellCenterUnits(bomb.cellX);
+    const centerY = cellCenterUnits(bomb.cellY);
+    const eventChainId = bomb.triggerChainId ?? chainId++;
+    const eventChainLength = (bomb.triggerChainLength ?? 0) + 1;
+    const parentEventId = bomb.triggerParentEventId ?? null;
+    const responsibleActor = bomb.triggerResponsibleActor ?? bomb.owner;
+    if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
+    maxChain = Math.max(maxChain, eventChainLength);
+
+    for (const targetId of [0, 1] as const) {
+      const currentPlayer = nextPlayers[targetId];
+      const dx = currentPlayer.x - centerX;
+      const dy = currentPlayer.y - centerY;
+      if (dx * dx + dy * dy > BOMB_RADIUS_UNITS * BOMB_RADIUS_UNITS) continue;
+      if (existingEventCount + events.length >= MAX_EVENTS_PER_TICK) {
+        technicalInvalid = true;
+        break;
+      }
+
+      const protectedTarget = currentPlayer.respawnInvulnerableTicks > 0;
+      let nextPlayer = currentPlayer;
+      let damage = 0;
+      let pushX = 0;
+      let pushY = 0;
+      if (!protectedTarget) {
+        damage = BOMB_DAMAGE;
+        nextPlayer = moveAwayFromTrap({
+          ...currentPlayer,
+          hp: Math.max(0, currentPlayer.hp - damage),
+          placement: null,
+          investigation: null,
+        }, bomb, BOMB_PUSH_UNITS);
+        pushX = nextPlayer.x - currentPlayer.x;
+        pushY = nextPlayer.y - currentPlayer.y;
+      }
+
+      events.push({
+        id: eventId,
+        tick,
+        chainId: eventChainId,
+        parentEventId,
+        chainLength: eventChainLength,
+        trapId: bomb.id,
+        owner: bomb.owner,
+        kind: bomb.kind,
+        target: targetId,
+        responsibleActor,
+        x: currentPlayer.x,
+        y: currentPlayer.y,
+        damage,
+        pushX,
+        pushY,
+      });
+      eventId += 1;
+      nextPlayers[targetId] = nextPlayer;
+      if (eventChainLength > MAX_CHAIN_TRAPS || existingEventCount + events.length >= MAX_EVENT_LOG) {
+        technicalInvalid = true;
+        break;
+      }
+    }
+    if (technicalInvalid) break;
+  }
+
   return {
     players: nextPlayers,
     traps: remainingTraps,
@@ -674,6 +833,19 @@ function stepShots(
   return { players: nextPlayers, shots: nextShots, placementCancelled, pushedBy };
 }
 
+function gasSlowTicksFor(player: PlayerState, traps: readonly TrapState[]): number {
+  let effectTicks = 0;
+  for (const trap of traps) {
+    if (trap.kind !== 'moya' || (trap.effectTicks ?? 0) <= 0) continue;
+    const dx = player.x - cellCenterUnits(trap.cellX);
+    const dy = player.y - cellCenterUnits(trap.cellY);
+    if (dx * dx + dy * dy <= MOYA_RADIUS_UNITS * MOYA_RADIUS_UNITS) {
+      effectTicks = Math.max(effectTicks, trap.effectTicks ?? 0);
+    }
+  }
+  return effectTicks;
+}
+
 function determineResult(
   tick: number,
   players: readonly [PlayerState, PlayerState],
@@ -704,9 +876,19 @@ export function advanceWorld(
     { x: world.players[1].x, y: world.players[1].y },
   ];
   let nextEntityId = world.nextEntityId;
-  const playerStep = stepPlayer(world.players[0], playerInput, world.players[1], world.traps, nextEntityId);
+  const preparedPlayers: readonly [PlayerState, PlayerState] = [
+    {
+      ...world.players[0],
+      gasSlowTicks: gasSlowTicksFor(world.players[0], world.traps),
+    },
+    {
+      ...world.players[1],
+      gasSlowTicks: gasSlowTicksFor(world.players[1], world.traps),
+    },
+  ];
+  const playerStep = stepPlayer(preparedPlayers[0], playerInput, preparedPlayers[1], world.traps, nextEntityId);
   if (playerStep.shot) nextEntityId += 1;
-  const cpuStep = stepPlayer(world.players[1], cpuInput, playerStep.player, world.traps, nextEntityId);
+  const cpuStep = stepPlayer(preparedPlayers[1], cpuInput, playerStep.player, world.traps, nextEntityId);
   if (cpuStep.shot) nextEntityId += 1;
 
   const placementInProgress: readonly [boolean, boolean] = [
@@ -760,6 +942,19 @@ export function advanceWorld(
   cpu = trapStep.players[1];
   traps = trapStep.traps;
 
+  const delayedTrapStep = resolveDelayedTrapEffects(
+    world.tick,
+    [player, cpu],
+    traps,
+    trapStep.nextEventId,
+    trapStep.nextChainId,
+    trapStep.maxChain,
+    trapStep.events.length,
+  );
+  player = delayedTrapStep.players[0];
+  cpu = delayedTrapStep.players[1];
+  traps = delayedTrapStep.traps;
+
   const playerInvestigation = stepInvestigation(player, playerInput, traps);
   player = playerInvestigation.player;
   traps = playerInvestigation.traps;
@@ -768,15 +963,25 @@ export function advanceWorld(
   traps = cpuInvestigation.traps;
 
   const nextTick = world.tick + 1;
-  const events = [...world.events, ...trapStep.events];
-  const result = determineResult(nextTick, [player, cpu], trapStep.technicalInvalid || events.length > MAX_EVENT_LOG);
+  const tickEvents = [...trapStep.events, ...delayedTrapStep.events];
+  const events = [...world.events, ...tickEvents];
+  const nextTraps = advanceTrapTimers(traps);
+  const nextPlayers: readonly [PlayerState, PlayerState] = [
+    { ...player, gasSlowTicks: gasSlowTicksFor(player, nextTraps) },
+    { ...cpu, gasSlowTicks: gasSlowTicksFor(cpu, nextTraps) },
+  ];
+  const result = determineResult(
+    nextTick,
+    nextPlayers,
+    trapStep.technicalInvalid || delayedTrapStep.technicalInvalid || events.length > MAX_EVENT_LOG,
+  );
   const nextWorld: WorldState = {
     phase: result ? 'result' : world.phase,
     tick: nextTick,
     seed: world.seed,
-    players: [player, cpu],
+    players: nextPlayers,
     shots: shotStep.shots,
-    traps: advanceTrapTimers(traps),
+    traps: nextTraps,
     nextEntityId,
     shotsFired: [
       world.shotsFired[0] + (playerStep.shot ? 1 : 0),
@@ -791,9 +996,9 @@ export function advanceWorld(
       world.trapsDisarmed[1] + (cpuInvestigation.disarmed ? 1 : 0),
     ],
     events,
-    nextEventId: trapStep.nextEventId,
-    nextChainId: trapStep.nextChainId,
-    maxChain: trapStep.maxChain,
+    nextEventId: delayedTrapStep.nextEventId,
+    nextChainId: delayedTrapStep.nextChainId,
+    maxChain: delayedTrapStep.maxChain,
     result,
     lastHash: '',
   };

@@ -1,4 +1,4 @@
-export type SoundCue = 'shot' | 'hit' | 'bounce' | 'shock' | 'hatch' | 'win' | 'lose' | 'draw';
+export type SoundCue = 'shot' | 'hit' | 'bounce' | 'shock' | 'hatch' | 'bomb' | 'moya' | 'win' | 'lose' | 'draw';
 
 export interface SoundSpec {
   readonly startHz: number;
@@ -15,6 +15,8 @@ export function soundSpec(cue: SoundCue): SoundSpec {
   if (cue === 'bounce') return { startHz: 300, endHz: 720, durationMs: 160, gain: 0.05 };
   if (cue === 'shock') return { startHz: 900, endHz: 240, durationMs: 220, gain: 0.045 };
   if (cue === 'hatch') return { startHz: 160, endHz: 80, durationMs: 280, gain: 0.06 };
+  if (cue === 'bomb') return { startHz: 180, endHz: 60, durationMs: 260, gain: 0.06 };
+  if (cue === 'moya') return { startHz: 220, endHz: 520, durationMs: 360, gain: 0.035 };
   if (cue === 'win') return { startHz: 440, endHz: 880, durationMs: 360, gain: 0.055 };
   if (cue === 'lose') return { startHz: 260, endHz: 120, durationMs: 360, gain: 0.055 };
   return { startHz: 330, endHz: 330, durationMs: 240, gain: 0.05 };
@@ -123,6 +125,6 @@ export class SoundEngine {
 interface WorldStateLike {
   readonly players: readonly [{ readonly hp: number }, { readonly hp: number }];
   readonly shotsFired: readonly [number, number];
-  readonly events: readonly { readonly kind: 'bounce' | 'shock' | 'hatch' }[];
+  readonly events: readonly { readonly kind: 'bounce' | 'shock' | 'hatch' | 'bomb' | 'moya' }[];
   readonly result: string | null;
 }

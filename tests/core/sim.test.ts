@@ -8,11 +8,15 @@ import {
 } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 import {
+  BOMB_DAMAGE,
+  BOMB_TRIGGER_TICKS,
   DISARM_TICKS,
   FIRE_COOLDOWN_TICKS,
   HATCH_DISABLED_TICKS,
   INVESTIGATE_TICKS,
   MAX_ACTIVE_TRAPS,
+  MOYA_EFFECT_TICKS,
+  MOYA_SLOWED_SPEED_UNITS_PER_TICK,
   SHOT_PUSH_UNITS,
   TRAP_COSTS,
   TRAP_PLACEMENT_TICKS,
@@ -345,6 +349,67 @@ describe('fixed simulation', () => {
     expect(world.players[0].x).toBe(2 * 9_600);
     expect(world.players[0].respawnInvulnerableTicks).toBeGreaterThan(0);
     expect(world.shotsFired[0]).toBe(0);
+  });
+
+  it('arms a Pon玉 on contact and explodes after the fixed fuse', () => {
+    const base = createWorld(181);
+    const bomb: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'bomb',
+      direction: 0,
+      cellX: 3,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    let world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 28_288 }, base.players[1]],
+      traps: [bomb],
+      nextEntityId: 3,
+    };
+    world = advanceWorld(world, { moveX: 1 });
+    expect(world.players[0].hp).toBe(100);
+    expect(world.events).toHaveLength(0);
+    expect(world.traps[0].triggerTicks).toBe(BOMB_TRIGGER_TICKS - 1);
+
+    for (let tick = 0; tick < BOMB_TRIGGER_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+    expect(world.players[0].hp).toBe(100 - BOMB_DAMAGE);
+    expect(world.traps).toHaveLength(0);
+    expect(world.events).toHaveLength(1);
+    expect(world.events[0]).toMatchObject({ kind: 'bomb', damage: BOMB_DAMAGE, chainLength: 1 });
+  });
+
+  it('slows movement only while a モヤびん field is active', () => {
+    const base = createWorld(182);
+    const moya: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'moya',
+      direction: 0,
+      cellX: 3,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    let world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 28_800 }, base.players[1]],
+      traps: [moya],
+      nextEntityId: 3,
+    };
+    world = advanceWorld(world);
+    expect(world.events[0].kind).toBe('moya');
+    expect(world.traps[0].effectTicks).toBe(MOYA_EFFECT_TICKS - 1);
+    const before = world.players[0].x;
+    world = advanceWorld(world, { moveX: 1 });
+    expect(world.players[0].x - before).toBe(MOYA_SLOWED_SPEED_UNITS_PER_TICK);
+    expect(world.players[0].gasSlowTicks).toBeGreaterThan(0);
   });
 
   it('ends immediately when trap damage defeats one player', () => {

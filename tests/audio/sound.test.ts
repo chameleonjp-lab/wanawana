@@ -6,6 +6,8 @@ describe('sound cues', () => {
     expect(soundSpec('bounce')).toEqual({ startHz: 300, endHz: 720, durationMs: 160, gain: 0.05 });
     expect(soundSpec('shock').durationMs).toBe(220);
     expect(soundSpec('hatch').endHz).toBe(80);
+    expect(soundSpec('bomb').startHz).toBe(180);
+    expect(soundSpec('moya').durationMs).toBe(360);
   });
 
   it('uses separate result cues', () => {

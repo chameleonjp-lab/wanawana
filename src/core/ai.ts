@@ -99,7 +99,9 @@ function hasDangerCue(
 }
 
 function chooseTrapKind(world: WorldState, chainPlanning: 1 | 2 | 3): TrapKind {
-  const cycle = Math.trunc(Math.max(0, world.tick - 45) / 180) % 3;
+  const cycle = Math.trunc(Math.max(0, world.tick - 45) / 180) % 5;
+  if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.bomb && cycle === 3) return 'bomb';
+  if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.moya && cycle === 4) return 'moya';
   if (chainPlanning >= 3 && world.players[1].gear >= TRAP_COSTS.hatch && cycle === 2) return 'hatch';
   if (chainPlanning >= 2 && world.players[1].gear >= TRAP_COSTS.shock && cycle === 1) return 'shock';
   return 'bounce';

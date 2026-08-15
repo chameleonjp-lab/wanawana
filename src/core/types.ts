@@ -4,7 +4,7 @@ export const CELL_UNITS = 9_600;
 export const ARENA_WIDTH_CELLS = 9;
 export const ARENA_HEIGHT_CELLS = 13;
 
-export const TRAP_KINDS = ['bounce', 'shock', 'hatch'] as const;
+export const TRAP_KINDS = ['bounce', 'shock', 'hatch', 'bomb', 'moya'] as const;
 export type TrapKind = (typeof TRAP_KINDS)[number];
 export type TrapDirection = 0 | 1 | 2 | 3;
 export type InvestigationMode = 'reveal' | 'disarm';
@@ -37,6 +37,15 @@ export interface TrapState {
   readonly armingTicks: number;
   readonly remainingTicks: number;
   readonly discoveredBy: readonly [boolean, boolean];
+  /** Remaining fuse ticks after a player has entered a bomb. */
+  readonly triggerTicks?: number;
+  /** Remaining active ticks for a triggered moya gas field. */
+  readonly effectTicks?: number;
+  /** The chain context captured when a delayed trap is triggered. */
+  readonly triggerParentEventId?: number | null;
+  readonly triggerChainId?: number | null;
+  readonly triggerChainLength?: number;
+  readonly triggerResponsibleActor?: 0 | 1;
 }
 
 export type GamePhase = 'title' | 'battle' | 'paused' | 'result';
@@ -48,6 +57,7 @@ export interface PlayerState {
   readonly hp: number;
   readonly fireCooldownTicks: number;
   readonly fireSlowTicks: number;
+  readonly gasSlowTicks: number;
   readonly pushImmunityTicks: number;
   readonly trapCooldownTicks: number;
   readonly gear: number;
