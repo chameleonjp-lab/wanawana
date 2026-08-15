@@ -3,10 +3,14 @@ import './styles.css';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
+import {
+  getCpuDifficultyProfile,
+  normalizeCpuDifficulty,
+} from './core/difficulty.ts';
 import { cellCenterUnits, cellToPixels, INVESTIGATE_RADIUS_UNITS, snapToCell } from './core/fixed.ts';
 import { buildMatchReport, chainHeading } from './core/result.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
-import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, TICK_RATE, type InputCommand, type WorldState } from './core/types.ts';
+import { ARENA_HEIGHT_CELLS, ARENA_WIDTH_CELLS, TICK_RATE, type CpuDifficulty, type InputCommand, type WorldState } from './core/types.ts';
 import { InputController } from './input/controller.ts';
 
 const FRAME_MS = 1_000 / 60;
@@ -32,6 +36,9 @@ const resultHash = getElement<HTMLElement>('result-hash');
 const trapPreview = getElement<HTMLElement>('trap-preview');
 const inspectButton = getElement<HTMLButtonElement>('inspect-button');
 const soundButton = getElement<HTMLButtonElement>('sound-button');
+const difficultySelect = getElement<HTMLSelectElement>('difficulty-select');
+const difficultyHelp = getElement<HTMLElement>('difficulty-help');
+const difficultyValue = getElement<HTMLElement>('difficulty-value');
 const controls = getElement<HTMLElement>('controls');
 
 let pixiApp: Application | null = null;
@@ -39,6 +46,7 @@ let world: WorldState | null = null;
 let frameId = 0;
 let lastFrameTime = 0;
 let accumulator = 0;
+let cpuDifficulty: CpuDifficulty = 'normal';
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
 
@@ -65,6 +73,18 @@ function updateScreen(): void {
 function updateSoundButton(): void {
   soundButton.textContent = soundEngine.isEnabled ? '音: オン' : '音: オフ';
   soundButton.setAttribute('aria-pressed', String(soundEngine.isEnabled));
+}
+
+function updateDifficultyLabel(): void {
+  cpuDifficulty = normalizeCpuDifficulty(difficultySelect.value);
+  const profile = getCpuDifficultyProfile(cpuDifficulty);
+  difficultySelect.value = profile.id;
+  difficultyValue.textContent = profile.label;
+  difficultyHelp.textContent = cpuDifficulty === 'easy'
+    ? '反応がゆっくりで、射撃を外すことがあります。'
+    : cpuDifficulty === 'hard'
+      ? '危険への反応が早く、3種類の罠を連鎖に使います。'
+      : '反応、射撃の正確さ、連鎖の考え方が標準です。';
 }
 
 function webglAvailable(): boolean {
@@ -301,7 +321,7 @@ function loop(timestamp: number): void {
   let processed = 0;
   while (accumulator >= FRAME_MS && processed < MAX_TICKS_PER_FRAME) {
     const playerInput = readInput();
-    const cpuDecision = chooseCpuDecision(world);
+    const cpuDecision = chooseCpuDecision(world, cpuDifficulty);
     const previousWorld = world;
     world = advanceWorld(world, playerInput, cpuDecision.command);
     soundEngine.syncWorld(previousWorld, world);
@@ -410,6 +430,7 @@ function finishBattle(): void {
 }
 
 async function startBattle(): Promise<void> {
+  updateDifficultyLabel();
   void soundEngine.resume().then(updateSoundButton);
   const ready = await ensurePixi();
   if (!ready) {
@@ -446,6 +467,7 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('pause-button').addEventListener('click', () => pauseGame());
   getElement<HTMLButtonElement>('resume-button').addEventListener('click', resumeGame);
   soundButton.addEventListener('click', () => void soundEngine.toggle().then(updateSoundButton));
+  difficultySelect.addEventListener('change', updateDifficultyLabel);
   getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', returnToTitle);
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
@@ -473,6 +495,7 @@ function bindEvents(): void {
 bindEvents();
 updateScreen();
 updateSoundButton();
+updateDifficultyLabel();
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {
   machine.transition('unsupported');

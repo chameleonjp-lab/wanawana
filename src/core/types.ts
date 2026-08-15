@@ -9,6 +9,7 @@ export type TrapKind = (typeof TRAP_KINDS)[number];
 export type TrapDirection = 0 | 1 | 2 | 3;
 export type InvestigationMode = 'reveal' | 'disarm';
 export type MatchResult = 'player-win' | 'cpu-win' | 'draw' | 'time-draw' | 'technical-invalid';
+export type CpuDifficulty = 'easy' | 'normal' | 'hard';
 
 export interface PlacementState {
   readonly kind: TrapKind;
