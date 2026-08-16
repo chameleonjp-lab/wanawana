@@ -31,6 +31,12 @@ import {
   serializeMatchSummary,
   type MatchSummary,
 } from './core/progress.ts';
+import {
+  createMatchResume,
+  readMatchResume,
+  serializeMatchResume,
+  type MatchResume,
+} from './core/resume.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import {
   ARENA_HEIGHT_CELLS,
@@ -51,6 +57,8 @@ const FRAME_MS = 1_000 / 60;
 const MAX_TICKS_PER_FRAME = 5;
 const MAX_BACKLOG_TICKS = 8;
 const CONTEXT_RECOVERY_TIMEOUT_MS = 5_000;
+const RESUME_STORAGE_KEY = 'wanawana:v1:resume';
+const RESUME_SAVE_INTERVAL_TICKS = 2 * TICK_RATE;
 
 const machine = new AppStateMachine();
 const status = getElement<HTMLParagraphElement>('status');
@@ -87,6 +95,10 @@ const battleHeading = getElement<HTMLElement>('battle-heading');
 const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
 const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
+const resumeCard = getElement<HTMLElement>('resume-card');
+const resumeSummary = getElement<HTMLElement>('resume-summary');
+const resumeMatchButton = getElement<HTMLButtonElement>('resume-match-button');
+const discardResumeButton = getElement<HTMLButtonElement>('discard-resume-button');
 const controls = getElement<HTMLElement>('controls');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
@@ -101,6 +113,8 @@ let selectedLoadout: TrapLoadout = DEFAULT_TRAP_LOADOUT;
 let selectedMap: MapId = DEFAULT_MAP_ID;
 let matchSummary: MatchSummary = emptyMatchSummary();
 let summaryStorageAvailable = true;
+let resumeSnapshot: MatchResume | null = null;
+let resumeStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
 let replayRecorder: ReplayRecorder | null = null;
 let completedReplay: MatchReplay | null = null;
@@ -128,6 +142,7 @@ function updateScreen(): void {
   setVisible(resultView, state === 'result');
   status.textContent = state === 'battle' ? '固定tickで舞台を動かしています' : state === 'paused' ? '試合を停止しています' : '';
   updateTrapButtons();
+  updateResumePanel();
 }
 
 function updateSoundButton(): void {
@@ -185,6 +200,14 @@ function updateCareerSummary(): void {
   resultHistory.textContent = `${summaryHeadline(matchSummary)}。${summaryDetail(matchSummary)}`;
 }
 
+function updateResumePanel(): void {
+  const visible = machine.state === 'title' && resumeSnapshot !== null;
+  setVisible(resumeCard, visible);
+  if (!resumeSnapshot) return;
+  const map = getMapDefinition(resumeSnapshot.world.mapId);
+  resumeSummary.textContent = `${map.name}・${resumeSnapshot.world.tick}tick（残り約${Math.max(0, 150 - resumeSnapshot.world.tick / TICK_RATE).toFixed(1)}秒）。${resumeStorageAvailable ? '30分以内なら再開できます。' : '保存を確認できません。'}`;
+}
+
 function loadMatchSummary(): void {
   try {
     matchSummary = readMatchSummary(window.localStorage.getItem(SUMMARY_STORAGE_KEY));
@@ -213,6 +236,38 @@ function clearMatchSummary(): void {
   }
   matchSummary = emptyMatchSummary();
   updateCareerSummary();
+}
+
+function loadResumeSnapshot(): void {
+  try {
+    resumeSnapshot = readMatchResume(window.localStorage.getItem(RESUME_STORAGE_KEY), Date.now());
+    if (!resumeSnapshot) window.localStorage.removeItem(RESUME_STORAGE_KEY);
+  } catch {
+    resumeStorageAvailable = false;
+    resumeSnapshot = null;
+  }
+  updateResumePanel();
+}
+
+function clearResumeSnapshot(): void {
+  try {
+    window.localStorage.removeItem(RESUME_STORAGE_KEY);
+  } catch {
+    resumeStorageAvailable = false;
+  }
+  resumeSnapshot = null;
+  updateResumePanel();
+}
+
+function persistResumeSnapshot(): void {
+  if (!resumeStorageAvailable || !world || machine.state === 'result' || world.phase !== 'battle') return;
+  try {
+    const snapshot = createMatchResume(world, cpuDifficulty, Date.now());
+    window.localStorage.setItem(RESUME_STORAGE_KEY, serializeMatchResume(snapshot));
+    resumeSnapshot = snapshot;
+  } catch {
+    resumeStorageAvailable = false;
+  }
 }
 
 function recordFinishedMatch(report: MatchReport): void {
@@ -585,6 +640,7 @@ function loop(timestamp: number): void {
     world = advanceWorld(world, playerInput, cpuDecision.command);
     replayRecorder?.recordTick(playerInput, cpuDecision.command, world);
     soundEngine.syncWorld(previousWorld, world);
+    if (world.tick % RESUME_SAVE_INTERVAL_TICKS === 0 && world.phase === 'battle') persistResumeSnapshot();
     accumulator -= FRAME_MS;
     processed += 1;
   }
@@ -603,6 +659,7 @@ function pauseGame(message = '試合を停止しています。'): void {
   cancelAnimationFrame(frameId);
   inputController.deactivate();
   soundEngine.suspend();
+  persistResumeSnapshot();
   machine.transition('paused');
   updateScreen();
   status.textContent = message;
@@ -686,6 +743,7 @@ function finishBattle(): void {
   cancelAnimationFrame(frameId);
   clearContextRecoveryTimer();
   contextRecovery.endMatch();
+  clearResumeSnapshot();
   inputController.deactivate();
   if (!world) return;
   machine.transition('result');
@@ -718,6 +776,44 @@ async function copyMatchRecord(): Promise<void> {
   }
 }
 
+async function resumeBattle(): Promise<void> {
+  if (!resumeSnapshot) return;
+  const snapshot = resumeSnapshot;
+  selectedLoadout = normalizeTrapLoadout(snapshot.world.loadouts[0]);
+  loadoutSlot2.value = selectedLoadout[1];
+  loadoutSlot3.value = selectedLoadout[2];
+  selectedMap = snapshot.world.mapId;
+  mapSelect.value = selectedMap;
+  difficultySelect.value = snapshot.difficulty;
+  updateDifficultyLabel();
+  updateLoadoutLabel();
+  updateMapLabel();
+  void soundEngine.resume().then(updateSoundButton);
+  const ready = await ensurePixi();
+  if (!ready || resumeSnapshot !== snapshot) return;
+
+  clearResumeSnapshot();
+  inputController.setTrapLoadout(selectedLoadout);
+  contextRecovery.startMatch();
+  world = snapshot.world;
+  summaryRecordedWorld = null;
+  replayRecorder = null;
+  completedReplay = null;
+  copyRecordButton.disabled = true;
+  replayCopyStatus.textContent = '中断から再開した試合は、再現記録を作りません。';
+  inputController.activate();
+  machine.transition('battle');
+  updateScreen();
+  updateHud();
+  drawWorld();
+  startLoop();
+}
+
+function discardResume(): void {
+  clearResumeSnapshot();
+  status.textContent = '中断した試合を破棄しました。';
+}
+
 async function startBattle(): Promise<void> {
   updateDifficultyLabel();
   updateLoadoutLabel();
@@ -730,6 +826,7 @@ async function startBattle(): Promise<void> {
     return;
   }
   inputController.setTrapLoadout(selectedLoadout);
+  clearResumeSnapshot();
   contextRecovery.startMatch();
   world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout, selectedMap);
   summaryRecordedWorld = null;
@@ -749,6 +846,7 @@ function returnToTitle(message = ''): void {
   cancelAnimationFrame(frameId);
   clearContextRecoveryTimer();
   contextRecovery.endMatch();
+  clearResumeSnapshot();
   inputController.deactivate();
   inputController.setTrapLoadout(null);
   soundEngine.suspend();
@@ -772,6 +870,8 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('resume-button').addEventListener('click', resumeGame);
   soundButton.addEventListener('click', () => void soundEngine.toggle().then(updateSoundButton));
   clearCareerSummaryButton.addEventListener('click', clearMatchSummary);
+  resumeMatchButton.addEventListener('click', () => void resumeBattle());
+  discardResumeButton.addEventListener('click', discardResume);
   difficultySelect.addEventListener('change', updateDifficultyLabel);
   loadoutSlot2.addEventListener('change', updateLoadoutLabel);
   loadoutSlot3.addEventListener('change', updateLoadoutLabel);
@@ -803,6 +903,7 @@ function bindEvents(): void {
 
 bindEvents();
 loadMatchSummary();
+loadResumeSnapshot();
 updateScreen();
 updateSoundButton();
 updateDifficultyLabel();
