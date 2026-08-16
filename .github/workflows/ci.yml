@@ -23,3 +23,5 @@ jobs:
         run: npm ci
       - name: Run typecheck, tests, and production build
         run: npm run check
+      - name: Verify the exact production artifact
+        run: npm run verify:dist

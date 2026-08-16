@@ -15,6 +15,7 @@ npm run dev
 
 ```sh
 npm run check
+npm run verify:dist
 ```
 
 GitHub Pages向けの公開先は `/wanawana/` です。1.0では、WebGLを表示できない端末へ対応外の案内を表示します。PixiJSのCanvas描画へ自動切替することは前提にしません。
