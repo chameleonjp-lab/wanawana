@@ -1,5 +1,6 @@
 import { Application, Graphics } from 'pixi.js';
 import './styles.css';
+import { ContextRecovery } from './app/context-recovery.ts';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
@@ -49,6 +50,7 @@ import { InputController } from './input/controller.ts';
 const FRAME_MS = 1_000 / 60;
 const MAX_TICKS_PER_FRAME = 5;
 const MAX_BACKLOG_TICKS = 8;
+const CONTEXT_RECOVERY_TIMEOUT_MS = 5_000;
 
 const machine = new AppStateMachine();
 const status = getElement<HTMLParagraphElement>('status');
@@ -104,6 +106,8 @@ let replayRecorder: ReplayRecorder | null = null;
 let completedReplay: MatchReplay | null = null;
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
+const contextRecovery = new ContextRecovery();
+let contextRecoveryTimer: number | null = null;
 
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -244,6 +248,58 @@ function webglAvailable(): boolean {
   }
 }
 
+function clearContextRecoveryTimer(): void {
+  if (contextRecoveryTimer === null) return;
+  window.clearTimeout(contextRecoveryTimer);
+  contextRecoveryTimer = null;
+}
+
+function invalidateContextRecovery(message: string): void {
+  clearContextRecoveryTimer();
+  contextRecovery.endMatch();
+  returnToTitle(message);
+}
+
+function handleWebglContextLost(event: Event): void {
+  event.preventDefault();
+  const outcome = contextRecovery.loseContext();
+  if (!outcome.activeMatch) return;
+  inputController.reset();
+  soundEngine.suspend();
+  if (outcome.invalid) {
+    invalidateContextRecovery('描画領域を再び失ったため、この試合を無効にしました。');
+    return;
+  }
+  clearContextRecoveryTimer();
+  contextRecoveryTimer = window.setTimeout(() => {
+    contextRecoveryTimer = null;
+    if (contextRecovery.isPending) {
+      invalidateContextRecovery('描画領域を5秒以内に復旧できなかったため、この試合を無効にしました。');
+    }
+  }, CONTEXT_RECOVERY_TIMEOUT_MS);
+  if (machine.state === 'battle') {
+    pauseGame('描画領域を失ったため停止しました。復旧を確認しています。');
+  } else if (machine.state === 'paused') {
+    status.textContent = '描画領域を失ったため、復旧を確認しています';
+  }
+}
+
+function handleWebglContextRestored(): void {
+  if (!contextRecovery.isPending) return;
+  window.requestAnimationFrame(() => {
+    if (!contextRecovery.isPending || !world || !pixiApp) return;
+    try {
+      drawWorld();
+    } catch {
+      return;
+    }
+    if (!contextRecovery.markRestored()) return;
+    clearContextRecoveryTimer();
+    updateScreen();
+    status.textContent = '描画を復旧しました。再開するボタンを押してください。';
+  });
+}
+
 async function ensurePixi(): Promise<boolean> {
   if (pixiApp) return true;
   if (!webglAvailable()) {
@@ -265,10 +321,8 @@ async function ensurePixi(): Promise<boolean> {
       preserveDrawingBuffer: false,
     });
     arena.replaceChildren(app.canvas);
-    (app.canvas as HTMLCanvasElement).addEventListener('webglcontextlost', (event) => {
-      event.preventDefault();
-      if (machine.state === 'battle') pauseGame('描画領域を失ったため停止しました。復旧後に再開してください。');
-    });
+    (app.canvas as HTMLCanvasElement).addEventListener('webglcontextlost', handleWebglContextLost);
+    (app.canvas as HTMLCanvasElement).addEventListener('webglcontextrestored', handleWebglContextRestored);
     pixiApp = app;
     drawWorld();
     return true;
@@ -550,12 +604,17 @@ function pauseGame(message = '試合を停止しています。'): void {
   inputController.deactivate();
   soundEngine.suspend();
   machine.transition('paused');
-  status.textContent = message;
   updateScreen();
+  status.textContent = message;
 }
 
 function resumeGame(): void {
   if (machine.state !== 'paused') return;
+  if (!contextRecovery.canResume) {
+    status.textContent = '描画の復旧を待っています。';
+    return;
+  }
+  contextRecovery.markResumed();
   inputController.activate();
   void soundEngine.resume().then(updateSoundButton);
   machine.transition('battle');
@@ -625,6 +684,8 @@ function renderResultDetails(): void {
 
 function finishBattle(): void {
   cancelAnimationFrame(frameId);
+  clearContextRecoveryTimer();
+  contextRecovery.endMatch();
   inputController.deactivate();
   if (!world) return;
   machine.transition('result');
@@ -669,6 +730,7 @@ async function startBattle(): Promise<void> {
     return;
   }
   inputController.setTrapLoadout(selectedLoadout);
+  contextRecovery.startMatch();
   world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout, selectedMap);
   summaryRecordedWorld = null;
   completedReplay = null;
@@ -683,8 +745,10 @@ async function startBattle(): Promise<void> {
   startLoop();
 }
 
-function returnToTitle(): void {
+function returnToTitle(message = ''): void {
   cancelAnimationFrame(frameId);
+  clearContextRecoveryTimer();
+  contextRecovery.endMatch();
   inputController.deactivate();
   inputController.setTrapLoadout(null);
   soundEngine.suspend();
@@ -695,6 +759,7 @@ function returnToTitle(): void {
     machine.transition('title');
   }
   updateScreen();
+  if (message) status.textContent = message;
 }
 
 function bindEvents(): void {
@@ -711,9 +776,9 @@ function bindEvents(): void {
   loadoutSlot2.addEventListener('change', updateLoadoutLabel);
   loadoutSlot3.addEventListener('change', updateLoadoutLabel);
   mapSelect.addEventListener('change', updateMapLabel);
-  getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', returnToTitle);
+  getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', () => returnToTitle());
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
-  getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
+  getElement<HTMLButtonElement>('result-title-button').addEventListener('click', () => returnToTitle());
   copyRecordButton.addEventListener('click', () => void copyMatchRecord());
 
   window.addEventListener('blur', () => {
