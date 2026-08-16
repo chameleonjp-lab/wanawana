@@ -447,6 +447,12 @@ interface ContactCandidate {
   readonly distance: number;
 }
 
+interface PendingTrapSegment {
+  readonly targetId: 0 | 1;
+  readonly segment: TrapSegment;
+  readonly order: number;
+}
+
 interface TrapResolution {
   readonly players: readonly [PlayerState, PlayerState];
   readonly traps: readonly TrapState[];
@@ -766,6 +772,106 @@ function resolveDelayedTrapEffects(
   let maxChain = currentMaxChain;
   let technicalInvalid = false;
 
+  // A delayed blast can push a player through another trap. Keep those paths
+  // as ordered segments so recursive same-tick propagation has the same
+  // collision rules as ordinary movement.
+  const pendingSegments: PendingTrapSegment[] = [];
+  let pendingOrder = 0;
+  const enqueueSegment = (targetId: 0 | 1, segment: TrapSegment): void => {
+    pendingSegments.push({ targetId, segment, order: pendingOrder });
+    pendingOrder += 1;
+  };
+
+  const resolvePendingSegments = (): void => {
+    while (pendingSegments.length > 0 && !technicalInvalid) {
+      pendingSegments.sort((first, second) => first.order - second.order || first.targetId - second.targetId);
+      const pending = pendingSegments.shift();
+      if (!pending) break;
+      const candidate = findFirstContact(pending.segment, remainingTraps);
+      if (!candidate) continue;
+
+      const { targetId, segment } = pending;
+      const trap = candidate.trap;
+      const parentEventId = segment.parentEventId;
+      const eventChainId = segment.chainId ?? chainId++;
+      const eventChainLength = segment.chainLength + 1;
+      if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
+      maxChain = Math.max(maxChain, eventChainLength);
+
+      // A bomb keeps its event delayed, but carries the complete chain
+      // context so its later explosion remains a deterministic child event.
+      if (trap.kind === 'bomb' && (trap.triggerTicks ?? 0) === 0) {
+        remainingTraps = remainingTraps.map((current) => current.id === trap.id
+          ? {
+            ...current,
+            triggerTicks: BOMB_TRIGGER_TICKS,
+            triggerParentEventId: parentEventId,
+            triggerChainId: eventChainId,
+            triggerChainLength: segment.chainLength,
+            triggerResponsibleActor: segment.sourceActor,
+          }
+          : current);
+        continue;
+      }
+
+      if (existingEventCount + events.length >= MAX_EVENTS_PER_TICK) {
+        technicalInvalid = true;
+        break;
+      }
+
+      const moyaActivation = trap.kind === 'moya' && (trap.effectTicks ?? 0) === 0;
+      if (moyaActivation) {
+        remainingTraps = remainingTraps.map((current) => current.id === trap.id
+          ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
+          : current);
+      } else {
+        remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
+      }
+
+      const currentPlayer = nextPlayers[targetId];
+      const effect = applyTrapEffect(currentPlayer, trap, obstacles);
+      const event: TrapEvent = {
+        id: eventId,
+        tick,
+        chainId: eventChainId,
+        parentEventId,
+        chainLength: eventChainLength,
+        trapId: trap.id,
+        owner: trap.owner,
+        kind: trap.kind,
+        target: targetId,
+        responsibleActor: segment.sourceActor,
+        x: currentPlayer.x,
+        y: currentPlayer.y,
+        damage: effect.damage,
+        pushX: effect.pushX,
+        pushY: effect.pushY,
+      };
+      eventId += 1;
+      events.push(event);
+      nextPlayers[targetId] = effect.player;
+
+      if (eventChainLength > MAX_CHAIN_TRAPS || existingEventCount + events.length >= MAX_EVENT_LOG) {
+        technicalInvalid = true;
+        break;
+      }
+
+      if ((trap.kind === 'bounce' || trap.kind === 'shock')
+        && (effect.pushX !== 0 || effect.pushY !== 0)) {
+        enqueueSegment(targetId, {
+          startX: currentPlayer.x,
+          startY: currentPlayer.y,
+          endX: effect.player.x,
+          endY: effect.player.y,
+          sourceActor: segment.sourceActor,
+          parentEventId: event.id,
+          chainId: event.chainId,
+          chainLength: event.chainLength,
+        });
+      }
+    }
+  };
+
   const dueBombs = traps
     .filter((trap) => trap.kind === 'bomb' && (trap.triggerTicks ?? 0) === 1)
     .sort((first, second) => first.id - second.id);
@@ -844,6 +950,20 @@ function resolveDelayedTrapEffects(
         technicalInvalid = true;
         break;
       }
+
+      if (inBlast && (pushX !== 0 || pushY !== 0)) {
+        enqueueSegment(targetId, {
+          startX: currentPlayer.x,
+          startY: currentPlayer.y,
+          endX: nextPlayer.x,
+          endY: nextPlayer.y,
+          sourceActor: responsibleActor,
+          parentEventId: event.id,
+          chainId: event.chainId,
+          chainLength: event.chainLength,
+        });
+        resolvePendingSegments();
+      }
     }
     if (!technicalInvalid && explosionEventId !== null) {
       const chainRadiusSquared = BOMB_CHAIN_RADIUS_UNITS * BOMB_CHAIN_RADIUS_UNITS;
@@ -913,10 +1033,27 @@ function resolveDelayedTrapEffects(
           technicalInvalid = true;
           break;
         }
+
+        if ((triggeredTrap.kind === 'bounce' || triggeredTrap.kind === 'shock')
+          && (effect.pushX !== 0 || effect.pushY !== 0)) {
+          enqueueSegment(targetId, {
+            startX: currentPlayer.x,
+            startY: currentPlayer.y,
+            endX: effect.player.x,
+            endY: effect.player.y,
+            sourceActor: responsibleActor,
+            parentEventId: triggeredEvent.id,
+            chainId: triggeredEvent.chainId,
+            chainLength: triggeredEvent.chainLength,
+          });
+          resolvePendingSegments();
+        }
       }
     }
     if (technicalInvalid) break;
   }
+
+  if (existingEventCount + events.length >= MAX_EVENTS_PER_TICK) technicalInvalid = true;
 
   return {
     players: nextPlayers,
