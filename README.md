@@ -20,6 +20,8 @@ npm run verify:dist
 
 GitHub Pages向けの公開先は `/wanawana/` です。1.0では、WebGLを表示できない端末へ対応外の案内を表示します。PixiJSのCanvas描画へ自動切替することは前提にしません。
 
+公開用のActionsは `dist/` を一度だけ作り、検査済みのPages artifactをそのまま公開します。設定の境界は [`docs/m8-pages-deploy.md`](docs/m8-pages-deploy.md) に記録しています。
+
 一度オンラインで必須ファイルを取得した端末では、Service Workerにより次回以降のオフライン起動を試せます。更新版は試合中に切り替えず、タイトルまたは結果画面で利用者が選んだときだけ切り替えます。詳しい境界は [`docs/m8-offline-updates.md`](docs/m8-offline-updates.md) を参照してください。初回の完全オフライン起動は保証しません。
 
 端末内戦績は `wanawana:v1:summary` に結果確定時だけ保存します。技術的に無効になった試合は戦績へ加えません。保存が拒否された端末でも、メモリ上の集計で試合を続けられます。タイトル画面からワナワナ固有の記録だけを削除できます。
