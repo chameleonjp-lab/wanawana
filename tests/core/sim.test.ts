@@ -329,6 +329,44 @@ describe('fixed simulation', () => {
     expect(next.players[0].x).toBeGreaterThan(28_288);
   });
 
+  it('orders a trap already under the player before a trap reached on the first step', () => {
+    const base = createWorld(161);
+    const traps: TrapState[] = [
+      {
+        id: 10,
+        owner: 1,
+        kind: 'bounce',
+        direction: 0,
+        cellX: 2,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+      {
+        id: 2,
+        owner: 1,
+        kind: 'bounce',
+        direction: 0,
+        cellX: 3,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+    ];
+    const world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: 23_999, y: 57_600 }, base.players[1]],
+      traps,
+      nextEntityId: 11,
+    };
+
+    const next = advanceWorld(world, { moveX: 1 });
+
+    expect(next.events[0]).toMatchObject({ trapId: 10, kind: 'bounce' });
+  });
+
   it('connects a bounce into a shock trap within the same tick', () => {
     const base = createWorld(17);
     const traps: TrapState[] = [
