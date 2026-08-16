@@ -204,6 +204,17 @@ function stepPlayer(
     };
   }
 
+  if (player.placement && command.investigate && command.investigateStart) {
+    // Placement is a committed preview, not an uninterruptible animation.
+    // A deliberate investigation input cancels it before the investigation
+    // phase below selects a target. This keeps player and CPU behavior equal.
+    return {
+      player: { ...player, ...timers, placement: null },
+      shot: null,
+      completedPlacement: null,
+    };
+  }
+
   if (player.placement) {
     const remainingTicks = player.placement.remainingTicks - 1;
     if (remainingTicks > 0) {

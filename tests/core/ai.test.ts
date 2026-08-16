@@ -73,6 +73,32 @@ describe('deterministic CPU cognition', () => {
     expect(decision.visibleTrapIds).toEqual([]);
   });
 
+  it('interrupts placement when the shared danger cue arrives', () => {
+    const base = createWorld(2028);
+    const trap = enemyTrap({ cellX: 7, cellY: 6 });
+    const world: WorldState = {
+      ...base,
+      tick: 13,
+      players: [base.players[0], {
+        ...base.players[1],
+        x: 7 * CELL_UNITS - INVESTIGATE_RADIUS_UNITS / 2,
+        placement: {
+          kind: 'bounce',
+          direction: 0,
+          cellX: 8,
+          cellY: 6,
+          remainingTicks: 12,
+        },
+      }],
+      traps: [trap],
+      nextEntityId: 100,
+    };
+    const decision = chooseCpuDecision(world, 'hard');
+    expect(decision.reason).toBe('investigating');
+    expect(decision.command.investigate).toBe(true);
+    expect(decision.command.investigateStart).toBe(true);
+  });
+
   it('disarms a revealed enemy trap instead of moving through it', () => {
     const base = createWorld(2029);
     const trap = enemyTrap({ cellX: 7, cellY: 6, discoveredBy: [true, true] });
