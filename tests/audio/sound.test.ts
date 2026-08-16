@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { soundSpec } from '../../src/audio/sound.ts';
+import { classifySoundState, soundSpec } from '../../src/audio/sound.ts';
 
 describe('sound cues', () => {
   it('keeps cue profiles fixed and independent from simulation time', () => {
@@ -13,5 +13,13 @@ describe('sound cues', () => {
   it('uses separate result cues', () => {
     expect(soundSpec('win').endHz).toBeGreaterThan(soundSpec('lose').endHz);
     expect(soundSpec('draw').startHz).toBe(soundSpec('draw').endHz);
+  });
+
+  it('distinguishes browser audio states without affecting the simulation clock', () => {
+    expect(classifySoundState('running')).toBe('running');
+    expect(classifySoundState('suspended')).toBe('suspended');
+    expect(classifySoundState('interrupted')).toBe('interrupted');
+    expect(classifySoundState('closed')).toBe('closed');
+    expect(classifySoundState(undefined)).toBe('unavailable');
   });
 });

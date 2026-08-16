@@ -146,8 +146,30 @@ function updateScreen(): void {
 }
 
 function updateSoundButton(): void {
-  soundButton.textContent = soundEngine.isEnabled ? '音: オン' : '音: オフ';
+  const state = soundEngine.state;
+  soundButton.textContent = soundEngine.isEnabled
+    ? '音: オン'
+    : state === 'interrupted'
+      ? '音: 中断中'
+      : state === 'closed' || state === 'unavailable'
+        ? '音: 利用不可'
+        : '音: オフ';
   soundButton.setAttribute('aria-pressed', String(soundEngine.isEnabled));
+  soundButton.title = state === 'interrupted'
+    ? 'ブラウザが音声を中断しています。もう一度押すと再開を試します。'
+    : state === 'closed' || state === 'unavailable'
+      ? '音声を使えないため、音なしで試合を続けます。'
+      : '音のオン・オフ';
+}
+
+function handleSoundStateChange(): void {
+  updateSoundButton();
+  if (machine.state !== 'battle') return;
+  if (soundEngine.state === 'interrupted') {
+    status.textContent = '音が中断されています。試合は続きます。';
+  } else if (soundEngine.state === 'closed' || soundEngine.state === 'unavailable') {
+    status.textContent = '音なしで試合を続けます。';
+  }
 }
 
 function updateDifficultyLabel(): void {
@@ -665,17 +687,22 @@ function pauseGame(message = '試合を停止しています。'): void {
   status.textContent = message;
 }
 
-function resumeGame(): void {
+async function resumeGame(): Promise<void> {
   if (machine.state !== 'paused') return;
   if (!contextRecovery.canResume) {
     status.textContent = '描画の復旧を待っています。';
     return;
   }
   contextRecovery.markResumed();
+  const soundReady = await soundEngine.resume();
+  if (!contextRecovery.canResume) {
+    status.textContent = '描画の復旧を待っています。';
+    return;
+  }
   inputController.activate();
-  void soundEngine.resume().then(updateSoundButton);
   machine.transition('battle');
   updateScreen();
+  if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
 
@@ -788,7 +815,7 @@ async function resumeBattle(): Promise<void> {
   updateDifficultyLabel();
   updateLoadoutLabel();
   updateMapLabel();
-  void soundEngine.resume().then(updateSoundButton);
+  const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
   if (!ready || resumeSnapshot !== snapshot) return;
 
@@ -806,6 +833,7 @@ async function resumeBattle(): Promise<void> {
   updateScreen();
   updateHud();
   drawWorld();
+  if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
 
@@ -818,7 +846,7 @@ async function startBattle(): Promise<void> {
   updateDifficultyLabel();
   updateLoadoutLabel();
   updateMapLabel();
-  void soundEngine.resume().then(updateSoundButton);
+  const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
   if (!ready) {
     soundEngine.suspend();
@@ -839,6 +867,7 @@ async function startBattle(): Promise<void> {
   updateScreen();
   updateHud();
   drawWorld();
+  if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
 
@@ -867,8 +896,14 @@ function bindEvents(): void {
     updateScreen();
   });
   getElement<HTMLButtonElement>('pause-button').addEventListener('click', () => pauseGame());
-  getElement<HTMLButtonElement>('resume-button').addEventListener('click', resumeGame);
-  soundButton.addEventListener('click', () => void soundEngine.toggle().then(updateSoundButton));
+  getElement<HTMLButtonElement>('resume-button').addEventListener('click', () => void resumeGame());
+  soundEngine.addStateListener(handleSoundStateChange);
+  soundButton.addEventListener('click', () => {
+    void soundEngine.toggle().then((enabled) => {
+      updateSoundButton();
+      if (!enabled && machine.state === 'battle') status.textContent = '音なしで試合を続けます。';
+    });
+  });
   clearCareerSummaryButton.addEventListener('click', clearMatchSummary);
   resumeMatchButton.addEventListener('click', () => void resumeBattle());
   discardResumeButton.addEventListener('click', discardResume);
