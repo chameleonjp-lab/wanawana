@@ -507,6 +507,77 @@ describe('fixed simulation', () => {
     expect(world.maxChain).toBe(2);
   });
 
+  it('continues a bomb-induced bounce into a further shock trap', () => {
+    const base = createWorld(185);
+    const traps: TrapState[] = [
+      {
+        id: 2,
+        owner: 1,
+        kind: 'bomb',
+        direction: 0,
+        cellX: 3,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+      {
+        id: 3,
+        owner: 1,
+        kind: 'bounce',
+        direction: 1,
+        cellX: 4,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+      {
+        id: 4,
+        owner: 1,
+        kind: 'shock',
+        direction: 0,
+        cellX: 6,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [false, true],
+      },
+    ];
+    let world: WorldState = {
+      ...base,
+      players: [
+        { ...base.players[0], x: 3.1 * 9_600, y: 6 * 9_600 },
+        base.players[1],
+      ],
+      traps,
+      nextEntityId: 5,
+    };
+
+    world = advanceWorld(world);
+    for (let tick = 0; tick < BOMB_TRIGGER_TICKS - 1; tick += 1) {
+      world = advanceWorld(world);
+    }
+
+    expect(world.events).toHaveLength(3);
+    expect(world.events.map((event) => event.trapId)).toEqual([2, 3, 4]);
+    expect(world.events[1]).toMatchObject({
+      parentEventId: world.events[0].id,
+      chainId: world.events[0].chainId,
+      chainLength: 2,
+      kind: 'bounce',
+    });
+    expect(world.events[2]).toMatchObject({
+      parentEventId: world.events[1].id,
+      chainId: world.events[0].chainId,
+      chainLength: 3,
+      kind: 'shock',
+      damage: 18,
+    });
+    expect(world.players[0].hp).toBe(100 - BOMB_DAMAGE - 18);
+    expect(world.maxChain).toBe(3);
+  });
+
   it('slows movement only while a モヤびん field is active', () => {
     const base = createWorld(182);
     const moya: TrapState = {
