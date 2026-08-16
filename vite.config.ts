@@ -2,7 +2,7 @@ import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
-  const buildCommit = env.VITE_BUILD_COMMIT ?? env.GITHUB_SHA ?? 'local';
+  const buildCommit = env.VITE_BUILD_COMMIT?.trim() || env.GITHUB_SHA?.trim() || 'local';
   return {
     base: '/wanawana/',
     define: {
