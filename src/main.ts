@@ -32,6 +32,12 @@ import {
   type MatchSummary,
 } from './core/progress.ts';
 import {
+  createMatchSettings,
+  readMatchSettings,
+  serializeMatchSettings,
+  SETTINGS_STORAGE_KEY,
+} from './core/settings.ts';
+import {
   createMatchResume,
   readMatchResume,
   serializeMatchResume,
@@ -95,6 +101,7 @@ const battleHeading = getElement<HTMLElement>('battle-heading');
 const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
 const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
+const settingsNote = getElement<HTMLElement>('settings-note');
 const resumeCard = getElement<HTMLElement>('resume-card');
 const resumeSummary = getElement<HTMLElement>('resume-summary');
 const resumeMatchButton = getElement<HTMLButtonElement>('resume-match-button');
@@ -113,6 +120,7 @@ let selectedLoadout: TrapLoadout = DEFAULT_TRAP_LOADOUT;
 let selectedMap: MapId = DEFAULT_MAP_ID;
 let matchSummary: MatchSummary = emptyMatchSummary();
 let summaryStorageAvailable = true;
+let settingsStorageAvailable = true;
 let resumeSnapshot: MatchResume | null = null;
 let resumeStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
@@ -220,6 +228,36 @@ function updateCareerSummary(): void {
     ? `${summaryDetail(matchSummary)}（この端末に保存）`
     : `${summaryDetail(matchSummary)}（保存できないため、この画面を閉じると消えます）`;
   resultHistory.textContent = `${summaryHeadline(matchSummary)}。${summaryDetail(matchSummary)}`;
+}
+
+function updateSettingsNote(): void {
+  settingsNote.textContent = settingsStorageAvailable
+    ? '難度・舞台・罠ロードアウトは、この端末に保存されます。'
+    : '設定を保存できない端末です。選んだ内容はこの画面を閉じると初期値へ戻ります。';
+}
+
+function loadMatchSettings(): void {
+  try {
+    const settings = readMatchSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY));
+    difficultySelect.value = settings.difficulty;
+    mapSelect.value = settings.mapId;
+    loadoutSlot2.value = settings.loadout[1];
+    loadoutSlot3.value = settings.loadout[2];
+  } catch {
+    settingsStorageAvailable = false;
+  }
+  updateSettingsNote();
+}
+
+function persistMatchSettings(): void {
+  if (!settingsStorageAvailable) return;
+  try {
+    const settings = createMatchSettings(cpuDifficulty, selectedMap, selectedLoadout);
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializeMatchSettings(settings));
+  } catch {
+    settingsStorageAvailable = false;
+    updateSettingsNote();
+  }
 }
 
 function updateResumePanel(): void {
@@ -815,6 +853,7 @@ async function resumeBattle(): Promise<void> {
   updateDifficultyLabel();
   updateLoadoutLabel();
   updateMapLabel();
+  persistMatchSettings();
   const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
   if (!ready || resumeSnapshot !== snapshot) return;
@@ -846,6 +885,7 @@ async function startBattle(): Promise<void> {
   updateDifficultyLabel();
   updateLoadoutLabel();
   updateMapLabel();
+  persistMatchSettings();
   const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
   if (!ready) {
@@ -907,10 +947,22 @@ function bindEvents(): void {
   clearCareerSummaryButton.addEventListener('click', clearMatchSummary);
   resumeMatchButton.addEventListener('click', () => void resumeBattle());
   discardResumeButton.addEventListener('click', discardResume);
-  difficultySelect.addEventListener('change', updateDifficultyLabel);
-  loadoutSlot2.addEventListener('change', updateLoadoutLabel);
-  loadoutSlot3.addEventListener('change', updateLoadoutLabel);
-  mapSelect.addEventListener('change', updateMapLabel);
+  difficultySelect.addEventListener('change', () => {
+    updateDifficultyLabel();
+    persistMatchSettings();
+  });
+  loadoutSlot2.addEventListener('change', () => {
+    updateLoadoutLabel();
+    persistMatchSettings();
+  });
+  loadoutSlot3.addEventListener('change', () => {
+    updateLoadoutLabel();
+    persistMatchSettings();
+  });
+  mapSelect.addEventListener('change', () => {
+    updateMapLabel();
+    persistMatchSettings();
+  });
   getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', () => returnToTitle());
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', () => returnToTitle());
@@ -938,6 +990,7 @@ function bindEvents(): void {
 
 bindEvents();
 loadMatchSummary();
+loadMatchSettings();
 loadResumeSnapshot();
 updateScreen();
 updateSoundButton();
