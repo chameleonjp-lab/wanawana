@@ -17,6 +17,11 @@ import {
   snapToCell,
 } from './core/fixed.ts';
 import { buildMatchReport, chainHeading, type MatchReport } from './core/result.ts';
+import {
+  ReplayRecorder,
+  serializeReplayRecord,
+  type MatchReplay,
+} from './core/replay.ts';
 import { getMapDefinition } from './core/maps.ts';
 import {
   emptyMatchSummary,
@@ -62,6 +67,8 @@ const resultSummary = getElement<HTMLElement>('result-summary');
 const resultDetails = getElement<HTMLElement>('result-details');
 const resultHistory = getElement<HTMLElement>('result-history');
 const resultHash = getElement<HTMLElement>('result-hash');
+const copyRecordButton = getElement<HTMLButtonElement>('copy-record-button');
+const replayCopyStatus = getElement<HTMLElement>('replay-copy-status');
 const trapPreview = getElement<HTMLElement>('trap-preview');
 const inspectButton = getElement<HTMLButtonElement>('inspect-button');
 const soundButton = getElement<HTMLButtonElement>('sound-button');
@@ -81,6 +88,7 @@ const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-sum
 const controls = getElement<HTMLElement>('controls');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
+const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
 let pixiApp: Application | null = null;
 let world: WorldState | null = null;
 let frameId = 0;
@@ -92,6 +100,8 @@ let selectedMap: MapId = DEFAULT_MAP_ID;
 let matchSummary: MatchSummary = emptyMatchSummary();
 let summaryStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
+let replayRecorder: ReplayRecorder | null = null;
+let completedReplay: MatchReplay | null = null;
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
 
@@ -519,6 +529,7 @@ function loop(timestamp: number): void {
     const cpuDecision = chooseCpuDecision(world, cpuDifficulty);
     const previousWorld = world;
     world = advanceWorld(world, playerInput, cpuDecision.command);
+    replayRecorder?.recordTick(playerInput, cpuDecision.command, world);
     soundEngine.syncWorld(previousWorld, world);
     accumulator -= FRAME_MS;
     processed += 1;
@@ -618,11 +629,32 @@ function finishBattle(): void {
   if (!world) return;
   machine.transition('result');
   const report = buildMatchReport(world);
+  completedReplay = replayRecorder?.finish(world) ?? null;
+  replayRecorder = null;
   recordFinishedMatch(report);
   resultSummary.textContent = `${report.resultLabel}。${world.tick}tickで試合を終えました。`;
   renderResultDetails();
   resultHash.textContent = world.lastHash;
+  copyRecordButton.disabled = completedReplay === null;
+  replayCopyStatus.textContent = completedReplay
+    ? '同じ記録を使えば、別の端末でも結果を検査できます。'
+    : '対戦記録を作れませんでした。';
   updateScreen();
+}
+
+async function copyMatchRecord(): Promise<void> {
+  if (!completedReplay) {
+    replayCopyStatus.textContent = 'コピーできる対戦記録がありません。';
+    return;
+  }
+  try {
+    const serialized = serializeReplayRecord(completedReplay);
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(serialized);
+    replayCopyStatus.textContent = `対戦記録をコピーしました（${Math.ceil(serialized.length / 1024)}KB）。`;
+  } catch {
+    replayCopyStatus.textContent = 'コピーできませんでした。安全な接続で再度お試しください。';
+  }
 }
 
 async function startBattle(): Promise<void> {
@@ -639,6 +671,10 @@ async function startBattle(): Promise<void> {
   inputController.setTrapLoadout(selectedLoadout);
   world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout, selectedMap);
   summaryRecordedWorld = null;
+  completedReplay = null;
+  replayRecorder = new ReplayRecorder(world, { buildCommit: BUILD_COMMIT });
+  copyRecordButton.disabled = true;
+  replayCopyStatus.textContent = '';
   inputController.activate();
   machine.transition('battle');
   updateScreen();
@@ -653,6 +689,8 @@ function returnToTitle(): void {
   inputController.setTrapLoadout(null);
   soundEngine.suspend();
   world = null;
+  replayRecorder = null;
+  completedReplay = null;
   if (machine.state === 'battle' || machine.state === 'paused' || machine.state === 'result') {
     machine.transition('title');
   }
@@ -676,6 +714,7 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('pause-title-button').addEventListener('click', returnToTitle);
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', returnToTitle);
+  copyRecordButton.addEventListener('click', () => void copyMatchRecord());
 
   window.addEventListener('blur', () => {
     inputController.reset();

@@ -1,6 +1,6 @@
 import type { WorldState } from './types.ts';
 
-function fnv1a(value: string): string {
+export function hashText(value: string): string {
   let hash = 2_166_136_261;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index);
@@ -107,5 +107,5 @@ export function serializeWorld(world: WorldState): string {
 }
 
 export function hashWorld(world: WorldState): string {
-  return fnv1a(serializeWorld(world));
+  return hashText(serializeWorld(world));
 }
