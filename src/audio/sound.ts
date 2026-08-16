@@ -7,6 +7,16 @@ export interface SoundSpec {
   readonly gain: number;
 }
 
+export type SoundState = 'unavailable' | 'running' | 'suspended' | 'interrupted' | 'closed';
+
+export function classifySoundState(state: string | undefined): SoundState {
+  if (state === 'running') return 'running';
+  if (state === 'suspended') return 'suspended';
+  if (state === 'interrupted') return 'interrupted';
+  if (state === 'closed') return 'closed';
+  return 'unavailable';
+}
+
 const MAX_VOICES = 8;
 
 export function soundSpec(cue: SoundCue): SoundSpec {
@@ -34,35 +44,54 @@ function audioContextConstructor(): AudioContextConstructor | null {
 
 export class SoundEngine {
   private context: AudioContext | null = null;
-  private activeVoices = 0;
+  private readonly activeVoices = new Map<OscillatorNode, GainNode>();
   private enabled = false;
+  private readonly stateListeners = new Set<() => void>();
+
+  public get state(): SoundState {
+    return classifySoundState(this.context?.state);
+  }
 
   public get isEnabled(): boolean {
     return this.enabled && this.context?.state === 'running';
   }
 
+  public addStateListener(listener: () => void): () => void {
+    this.stateListeners.add(listener);
+    return () => this.stateListeners.delete(listener);
+  }
+
   public async resume(): Promise<boolean> {
     const Constructor = audioContextConstructor();
-    if (!Constructor) return false;
+    if (!Constructor) {
+      this.enabled = false;
+      this.notifyStateListeners();
+      return false;
+    }
     if (!this.context) {
       try {
         this.context = new Constructor();
         this.context.addEventListener('statechange', this.handleStateChange);
       } catch {
         this.context = null;
+        this.enabled = false;
+        this.notifyStateListeners();
         return false;
       }
     }
     if (this.context.state === 'closed') {
       this.enabled = false;
+      this.notifyStateListeners();
       return false;
     }
     try {
       await this.context.resume();
       this.enabled = this.context.state === 'running';
+      this.notifyStateListeners();
       return this.enabled;
     } catch {
       this.enabled = false;
+      this.notifyStateListeners();
       return false;
     }
   }
@@ -77,12 +106,14 @@ export class SoundEngine {
 
   public suspend(): void {
     this.enabled = false;
+    this.stopVoices();
+    this.notifyStateListeners();
     if (!this.context || this.context.state === 'closed') return;
     void this.context.suspend().catch(() => undefined);
   }
 
   public play(cue: SoundCue): void {
-    if (!this.isEnabled || this.activeVoices >= MAX_VOICES || !this.context) return;
+    if (!this.isEnabled || this.activeVoices.size >= MAX_VOICES || !this.context) return;
     const context = this.context;
     const spec = soundSpec(cue);
     const now = context.currentTime;
@@ -97,11 +128,11 @@ export class SoundEngine {
     gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSeconds);
     oscillator.connect(gain);
     gain.connect(context.destination);
-    this.activeVoices += 1;
+    this.activeVoices.set(oscillator, gain);
     oscillator.addEventListener('ended', () => {
       oscillator.disconnect();
       gain.disconnect();
-      this.activeVoices = Math.max(0, this.activeVoices - 1);
+      this.activeVoices.delete(oscillator);
     }, { once: true });
     oscillator.start(now);
     oscillator.stop(now + durationSeconds + 0.01);
@@ -119,7 +150,25 @@ export class SoundEngine {
 
   private handleStateChange = (): void => {
     if (!this.context || this.context.state !== 'running') this.enabled = false;
+    this.notifyStateListeners();
   };
+
+  private stopVoices(): void {
+    for (const [oscillator, gain] of this.activeVoices) {
+      try {
+        oscillator.stop();
+      } catch {
+        // An oscillator can already be finished when the page is hidden.
+      }
+      oscillator.disconnect();
+      gain.disconnect();
+    }
+    this.activeVoices.clear();
+  }
+
+  private notifyStateListeners(): void {
+    for (const listener of this.stateListeners) listener();
+  }
 }
 
 interface WorldStateLike {
