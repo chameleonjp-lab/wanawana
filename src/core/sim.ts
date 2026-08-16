@@ -455,8 +455,13 @@ interface TrapSegment {
 
 interface ContactCandidate {
   readonly trap: TrapState;
-  /** Integer progress along the movement segment at first contact. */
-  readonly progress: number;
+  /** Integer progress and span used as a fixed rational contact time. */
+  readonly progress: ContactProgress;
+}
+
+interface ContactProgress {
+  readonly numerator: number;
+  readonly denominator: number;
 }
 
 interface PendingTrapSegment {
@@ -491,7 +496,7 @@ function firstContactProgress(
   centerX: number,
   centerY: number,
   radius: number,
-): number | null {
+): ContactProgress | null {
   const deltaX = endX - startX;
   const deltaY = endY - startY;
   const steps = Math.max(Math.abs(deltaX), Math.abs(deltaY));
@@ -501,13 +506,17 @@ function firstContactProgress(
   });
 
   if (steps === 0) {
-    return segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius) ? 0 : null;
+    return segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius)
+      ? { numerator: 0, denominator: 1 }
+      : null;
   }
   // Being inside the contact circle at the beginning of a segment is the
   // earliest possible contact. Returning zero is important when another trap
   // is reached on the first integer step: the starting trap must win even if
   // its entity id is larger.
-  if (segmentHitsCircle(startX, startY, startX, startY, centerX, centerY, radius)) return 0;
+  if (segmentHitsCircle(startX, startY, startX, startY, centerX, centerY, radius)) {
+    return { numerator: 0, denominator: steps };
+  }
   if (!segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius)) return null;
 
   let low = 0;
@@ -518,7 +527,13 @@ function firstContactProgress(
     if (segmentHitsCircle(startX, startY, point.x, point.y, centerX, centerY, radius)) high = middle;
     else low = middle;
   }
-  return high;
+  return { numerator: high, denominator: steps };
+}
+
+function compareContactProgress(first: ContactProgress, second: ContactProgress): number {
+  const left = BigInt(first.numerator) * BigInt(second.denominator);
+  const right = BigInt(second.numerator) * BigInt(first.denominator);
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function trapContactRadius(trap: TrapState): number {
@@ -547,7 +562,7 @@ function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): Co
     if (progress === null) continue;
     candidates.push({ trap, progress });
   }
-  candidates.sort((first, second) => first.progress - second.progress || first.trap.id - second.trap.id);
+  candidates.sort((first, second) => compareContactProgress(first.progress, second.progress) || first.trap.id - second.trap.id);
   return candidates[0] ?? null;
 }
 
@@ -701,8 +716,9 @@ function resolveTrapContacts(
     for (const id of [0, 1] as const) {
       const current = candidates[id];
       if (!current) continue;
-      if (!candidate || current.progress < candidate.progress
-        || (current.progress === candidate.progress && (id < (targetId ?? 2)
+      const progressOrder = candidate ? compareContactProgress(current.progress, candidate.progress) : -1;
+      if (!candidate || progressOrder < 0
+        || (progressOrder === 0 && (id < (targetId ?? 2)
           || (id === targetId && current.trap.id < candidate.trap.id)))) {
         targetId = id;
         candidate = current;
