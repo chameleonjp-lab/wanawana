@@ -116,6 +116,7 @@ const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
 let pixiApp: Application | null = null;
 let world: WorldState | null = null;
 let frameId = 0;
+let resizeFrameId: number | null = null;
 let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
@@ -397,6 +398,22 @@ function clearContextRecoveryTimer(): void {
   if (contextRecoveryTimer === null) return;
   window.clearTimeout(contextRecoveryTimer);
   contextRecoveryTimer = null;
+}
+
+function scheduleViewportRedraw(): void {
+  if (resizeFrameId !== null) window.cancelAnimationFrame(resizeFrameId);
+  resizeFrameId = window.requestAnimationFrame(() => {
+    resizeFrameId = null;
+    if (!world || !pixiApp || machine.state === 'title' || machine.state === 'unsupported') return;
+    updateHud();
+    drawWorld();
+  });
+}
+
+function handleViewportResize(message = '画面サイズが変わったため停止しました。表示が落ち着いてから再開してください。'): void {
+  inputController.reset();
+  if (machine.state === 'battle') pauseGame(message);
+  scheduleViewportRedraw();
 }
 
 function invalidateContextRecovery(message: string): void {
@@ -1021,9 +1038,14 @@ function bindEvents(): void {
     if (machine.state === 'battle') pauseGame('ページが隠れたため停止しました。');
   });
   window.addEventListener('orientationchange', () => {
-    inputController.reset();
-    if (machine.state === 'battle') pauseGame('縦向きに戻してから再開してください。');
+    handleViewportResize('画面の向きが変わったため停止しました。縦向きに戻してから再開してください。');
   });
+  window.addEventListener('resize', () => handleViewportResize());
+  window.visualViewport?.addEventListener('resize', () => handleViewportResize());
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(() => handleViewportResize());
+    observer.observe(arena);
+  }
 }
 
 bindEvents();
