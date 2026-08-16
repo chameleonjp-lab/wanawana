@@ -52,6 +52,21 @@ describe('deterministic match records', () => {
     expect(verifyReplayRecord(changedVersion).valid).toBe(false);
     expect(readReplayRecord('{"schemaVersion":999}')).toBeNull();
     expect(readReplayRecord('not-json')).toBeNull();
+    expect(readReplayRecord(JSON.stringify({
+      ...record,
+      checkpoints: [...record.checkpoints, { tick: record.commands.length + 1, hash: record.finalHash }],
+    }))).toBeNull();
+  });
+
+  it('does not produce a shareable record for a technically invalid match', () => {
+    const initial = createWorld(81);
+    const recorder = new ReplayRecorder(initial);
+    const invalidWorld = {
+      ...initial,
+      phase: 'result' as const,
+      result: 'technical-invalid' as const,
+    };
+    expect(recorder.finish(invalidWorld)).toBeNull();
   });
 
   it('reports the first checkpoint mismatch', () => {

@@ -184,8 +184,10 @@ function isReplayRecord(value: unknown): value is MatchReplay {
     || record.checkpoints.length > MAX_REPLAY_CHECKPOINTS
     || !record.checkpoints.every(isCheckpoint)
     || record.checkpoints[0].tick !== 0
+    || !record.checkpoints.every((checkpoint) => checkpoint.tick <= (record.commands as readonly unknown[]).length)
     || !record.checkpoints.every((checkpoint, index, checkpoints) => index === 0 || checkpoint.tick > checkpoints[index - 1].tick)
     || (record.finalHash !== null && (typeof record.finalHash !== 'string' || !HASH_PATTERN.test(record.finalHash)))
+    || (record.finalHash !== null && record.checkpoints[record.checkpoints.length - 1]?.tick !== record.commands.length)
     || !isMatchResult(record.result)) {
     return false;
   }
@@ -260,7 +262,7 @@ export class ReplayRecorder {
   }
 
   public finish(world: WorldState): MatchReplay | null {
-    if (this.failed || world.tick !== this.commands.length) return null;
+    if (this.failed || world.tick !== this.commands.length || world.result === 'technical-invalid') return null;
     const checkpoints = [...this.checkpoints];
     if (checkpoints[checkpoints.length - 1]?.tick !== world.tick && checkpoints.length < MAX_REPLAY_CHECKPOINTS) {
       checkpoints.push({ tick: world.tick, hash: world.lastHash });
