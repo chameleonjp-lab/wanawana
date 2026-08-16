@@ -33,6 +33,7 @@ import {
 } from './core/progress.ts';
 import {
   createMatchSettings,
+  defaultMatchSettings,
   readMatchSettings,
   serializeMatchSettings,
   SETTINGS_STORAGE_KEY,
@@ -102,6 +103,7 @@ const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
 const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
 const settingsNote = getElement<HTMLElement>('settings-note');
+const resetSettingsButton = getElement<HTMLButtonElement>('reset-settings');
 const resumeCard = getElement<HTMLElement>('resume-card');
 const resumeSummary = getElement<HTMLElement>('resume-summary');
 const resumeMatchButton = getElement<HTMLButtonElement>('resume-match-button');
@@ -258,6 +260,28 @@ function persistMatchSettings(): void {
     settingsStorageAvailable = false;
     updateSettingsNote();
   }
+}
+
+function resetMatchSettings(): void {
+  if (!window.confirm('ワナワナの難度・舞台・罠ロードアウトを初期値へ戻しますか？')) return;
+  const defaults = defaultMatchSettings();
+  difficultySelect.value = defaults.difficulty;
+  mapSelect.value = defaults.mapId;
+  loadoutSlot2.value = defaults.loadout[1];
+  loadoutSlot3.value = defaults.loadout[2];
+  try {
+    window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    settingsStorageAvailable = true;
+  } catch {
+    settingsStorageAvailable = false;
+  }
+  updateDifficultyLabel();
+  updateLoadoutLabel();
+  updateMapLabel();
+  updateSettingsNote();
+  status.textContent = settingsStorageAvailable
+    ? '設定を初期値へ戻しました。'
+    : '設定を初期値へ戻しました（保存は利用できません）。';
 }
 
 function updateResumePanel(): void {
@@ -945,6 +969,7 @@ function bindEvents(): void {
     });
   });
   clearCareerSummaryButton.addEventListener('click', clearMatchSummary);
+  resetSettingsButton.addEventListener('click', resetMatchSettings);
   resumeMatchButton.addEventListener('click', () => void resumeBattle());
   discardResumeButton.addEventListener('click', discardResume);
   difficultySelect.addEventListener('change', () => {
