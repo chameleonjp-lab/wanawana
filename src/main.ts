@@ -874,6 +874,14 @@ function finishBattle(): void {
   clearResumeSnapshot();
   inputController.deactivate();
   if (!world) return;
+  if (world.result === 'technical-invalid') {
+    // A technical stop is not a playable result. Do not show it as a win,
+    // do not update terminal statistics, and return to the title boundary.
+    replayRecorder = null;
+    completedReplay = null;
+    returnToTitle(`処理上限に達したため、この試合を無効にしました（${world.tick}tick）。`);
+    return;
+  }
   machine.transition('result');
   const report = buildMatchReport(world);
   completedReplay = replayRecorder?.finish(world) ?? null;
