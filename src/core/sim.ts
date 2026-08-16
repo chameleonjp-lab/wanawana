@@ -455,7 +455,8 @@ interface TrapSegment {
 
 interface ContactCandidate {
   readonly trap: TrapState;
-  readonly distance: number;
+  /** Integer progress along the movement segment at first contact. */
+  readonly progress: number;
 }
 
 interface PendingTrapSegment {
@@ -474,6 +475,48 @@ interface TrapResolution {
   readonly technicalInvalid: boolean;
 }
 
+/**
+ * Return the first integer progress at which a segment touches a circle.
+ *
+ * The simulation orders same-tick contacts by movement progress, not by the
+ * distance from the segment start to a trap centre. Progress is sampled in a
+ * fixed integer grid and found by binary search; this keeps the rule stable
+ * without consulting a frame clock or a floating-point time value.
+ */
+function firstContactProgress(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  centerX: number,
+  centerY: number,
+  radius: number,
+): number | null {
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const steps = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+  const pointAt = (progress: number): { x: number; y: number } => ({
+    x: startX + Math.trunc(deltaX * progress / steps),
+    y: startY + Math.trunc(deltaY * progress / steps),
+  });
+
+  if (steps === 0) {
+    return segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius) ? 0 : null;
+  }
+  if (!segmentHitsCircle(startX, startY, startX, startY, centerX, centerY, radius)
+    && !segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius)) return null;
+
+  let low = 0;
+  let high = steps;
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    const point = pointAt(middle);
+    if (segmentHitsCircle(startX, startY, point.x, point.y, centerX, centerY, radius)) high = middle;
+    else low = middle;
+  }
+  return high;
+}
+
 function trapContactRadius(trap: TrapState): number {
   if (trap.kind === 'bounce') return CELL_UNITS / 2;
   if (trap.kind === 'shock') return SHOCK_RADIUS_UNITS;
@@ -488,7 +531,7 @@ function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): Co
     if (trap.armingTicks > 0 || (trap.triggerTicks ?? 0) > 0 || (trap.effectTicks ?? 0) > 0) continue;
     const centerX = cellCenterUnits(trap.cellX);
     const centerY = cellCenterUnits(trap.cellY);
-    if (!segmentHitsCircle(
+    const progress = firstContactProgress(
       segment.startX,
       segment.startY,
       segment.endX,
@@ -496,12 +539,11 @@ function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): Co
       centerX,
       centerY,
       trapContactRadius(trap),
-    )) continue;
-    const dx = centerX - segment.startX;
-    const dy = centerY - segment.startY;
-    candidates.push({ trap, distance: dx * dx + dy * dy });
+    );
+    if (progress === null) continue;
+    candidates.push({ trap, progress });
   }
-  candidates.sort((first, second) => first.distance - second.distance || first.trap.id - second.trap.id);
+  candidates.sort((first, second) => first.progress - second.progress || first.trap.id - second.trap.id);
   return candidates[0] ?? null;
 }
 
@@ -655,8 +697,8 @@ function resolveTrapContacts(
     for (const id of [0, 1] as const) {
       const current = candidates[id];
       if (!current) continue;
-      if (!candidate || current.distance < candidate.distance
-        || (current.distance === candidate.distance && (id < (targetId ?? 2)
+      if (!candidate || current.progress < candidate.progress
+        || (current.progress === candidate.progress && (id < (targetId ?? 2)
           || (id === targetId && current.trap.id < candidate.trap.id)))) {
         targetId = id;
         candidate = current;
