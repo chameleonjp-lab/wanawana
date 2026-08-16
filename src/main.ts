@@ -1,6 +1,7 @@
 import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
+import { getMotionProfile } from './app/motion.ts';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
@@ -387,6 +388,11 @@ function webglAvailable(): boolean {
   }
 }
 
+function reducedMotionPreferred(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 function clearContextRecoveryTimer(): void {
   if (contextRecoveryTimer === null) return;
   window.clearTimeout(contextRecoveryTimer);
@@ -484,6 +490,7 @@ function readInput(): InputCommand {
 
 function drawWorld(): void {
   if (!pixiApp || !world) return;
+  const motion = getMotionProfile(reducedMotionPreferred());
   const map = getMapDefinition(world.mapId);
   const width = Math.max(1, arena.clientWidth);
   const height = Math.max(1, arena.clientHeight);
@@ -591,15 +598,21 @@ function drawWorld(): void {
 
   for (const event of world.events) {
     const age = world.tick - event.tick;
-    if (age < 0 || age > 30) continue;
+    if (age < 0 || age > motion.eventMarkerTicks) continue;
     const eventX = offsetX + cellToPixels(event.x, pixelsPerCell);
     const eventY = offsetY + cellToPixels(event.y, pixelsPerCell);
     const marker = new Graphics();
     const color = trapColor(event.kind);
-    marker.circle(eventX, eventY, Math.max(10, pixelsPerCell * (0.2 + age / 180)))
-      .stroke({ color, alpha: Math.max(0.2, 1 - age / 30), width: 2 });
+    const markerRadius = motion.showRays
+      ? Math.max(10, pixelsPerCell * (0.2 + age / 180))
+      : Math.max(10, pixelsPerCell * 0.28);
+    const markerAlpha = motion.showRays
+      ? Math.max(0.2, 1 - age / motion.eventMarkerTicks)
+      : 0.86;
+    marker.circle(eventX, eventY, markerRadius)
+      .stroke({ color, alpha: markerAlpha, width: 2 });
     stage.addChild(marker);
-    if (age <= 12) {
+    if (motion.showRays && age <= motion.burstTicks) {
       const burst = new Graphics();
       const burstAlpha = Math.max(0.08, 0.7 - age / 18);
       const burstRadius = pixelsPerCell * (0.28 + age / 60);
