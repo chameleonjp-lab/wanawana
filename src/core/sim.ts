@@ -503,8 +503,12 @@ function firstContactProgress(
   if (steps === 0) {
     return segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius) ? 0 : null;
   }
-  if (!segmentHitsCircle(startX, startY, startX, startY, centerX, centerY, radius)
-    && !segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius)) return null;
+  // Being inside the contact circle at the beginning of a segment is the
+  // earliest possible contact. Returning zero is important when another trap
+  // is reached on the first integer step: the starting trap must win even if
+  // its entity id is larger.
+  if (segmentHitsCircle(startX, startY, startX, startY, centerX, centerY, radius)) return 0;
+  if (!segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius)) return null;
 
   let low = 0;
   let high = steps;
