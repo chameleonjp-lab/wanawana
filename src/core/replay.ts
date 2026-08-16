@@ -1,7 +1,5 @@
-import {
-  isTrapKind,
-  normalizeCommand,
-} from './fixed.ts';
+import { isTrapKind, normalizeCommand } from './fixed.ts';
+import { BALANCE_CONFIG_HASH } from './balance.ts';
 import { hashText } from './hash.ts';
 import { getMapDefinition, isMapId } from './maps.ts';
 import { advanceWorld, createWorld } from './sim.ts';
@@ -18,14 +16,13 @@ import {
 
 export const REPLAY_SCHEMA_VERSION = 1 as const;
 export const REPLAY_INPUT_ENCODING_VERSION = 1 as const;
-export const REPLAY_ENGINE_VERSION = 'wanawana-sim-v1' as const;
+export const REPLAY_ENGINE_VERSION = 'wanawana-sim-v2' as const;
 export const REPLAY_PRNG_NAME = 'fixed-integer-v1' as const;
 export const REPLAY_CHECKPOINT_INTERVAL_TICKS = 300;
 export const MAX_REPLAY_COMMANDS = 11_000;
 export const MAX_REPLAY_CHECKPOINTS = 100;
 export const MAX_REPLAY_JSON_BYTES = 2_000_000;
 
-const BALANCE_CONFIG_ID = 'wanawana-balance-v1';
 const HASH_PATTERN = /^[0-9a-f]{8}$/;
 
 export interface ReplayCommand {
@@ -204,7 +201,7 @@ function createReplayRecord(
     schemaVersion: REPLAY_SCHEMA_VERSION,
     engineVersion,
     buildCommit,
-    balanceConfigHash: hashText(BALANCE_CONFIG_ID),
+    balanceConfigHash: BALANCE_CONFIG_HASH,
     mapHash: mapHash(normalizedMapId),
     prngName: REPLAY_PRNG_NAME,
     seed: world.seed >>> 0,
@@ -303,7 +300,7 @@ export function verifyReplayRecord(record: MatchReplay): ReplayVerification {
   }
 
   if (record.engineVersion !== REPLAY_ENGINE_VERSION
-    || record.balanceConfigHash !== hashText(BALANCE_CONFIG_ID)
+    || record.balanceConfigHash !== BALANCE_CONFIG_HASH
     || record.mapHash !== mapHash(record.mapId)) {
     return {
       valid: false,

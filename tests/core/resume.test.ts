@@ -6,6 +6,7 @@ import {
   serializeMatchResume,
 } from '../../src/core/resume.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
+import { BALANCE_CONFIG_HASH } from '../../src/core/balance.ts';
 
 describe('interrupted match resume records', () => {
   it('round-trips a validated battle state with its difficulty and hash', () => {
@@ -19,6 +20,7 @@ describe('interrupted match resume records', () => {
     expect(restored).toEqual(saved);
     expect(restored?.world.lastHash).toBe(world.lastHash);
     expect(restored?.difficulty).toBe('hard');
+    expect(saved.balanceConfigHash).toBe(BALANCE_CONFIG_HASH);
   });
 
   it('accepts a state that already contains trap events and delayed fields', () => {
