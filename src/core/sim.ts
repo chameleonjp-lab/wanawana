@@ -514,6 +514,82 @@ function moveAwayFromTrap(
   return moveByDirection(player, dy < 0 ? 0 : 2, distance, obstacles);
 }
 
+interface TrapEffectResult {
+  readonly player: PlayerState;
+  readonly damage: number;
+  readonly pushX: number;
+  readonly pushY: number;
+}
+
+function applyTrapEffect(
+  player: PlayerState,
+  trap: TrapState,
+  obstacles: readonly ObstacleCell[],
+): TrapEffectResult {
+  const protectedTarget = player.respawnInvulnerableTicks > 0;
+  let nextPlayer = player;
+  let damage = 0;
+  let pushX = 0;
+  let pushY = 0;
+
+  if (!protectedTarget) {
+    if (trap.kind === 'bounce') {
+      nextPlayer = moveByDirection({ ...player, placement: null, investigation: null }, trap.direction, BOUNCE_PUSH_UNITS, obstacles);
+      pushX = nextPlayer.x - player.x;
+      pushY = nextPlayer.y - player.y;
+    } else if (trap.kind === 'shock') {
+      damage = 18;
+      nextPlayer = moveAwayFromTrap({
+        ...player,
+        hp: Math.max(0, player.hp - damage),
+        placement: null,
+        investigation: null,
+      }, trap, SHOCK_PUSH_UNITS, obstacles);
+      pushX = nextPlayer.x - player.x;
+      pushY = nextPlayer.y - player.y;
+    } else if (trap.kind === 'hatch') {
+      damage = 26;
+      nextPlayer = {
+        ...player,
+        hp: Math.max(0, player.hp - damage),
+        disabledTicks: HATCH_DISABLED_TICKS,
+        placement: null,
+        investigation: null,
+      };
+    }
+  }
+
+  if (trap.kind === 'moya') {
+    nextPlayer = {
+      ...nextPlayer,
+      placement: null,
+      investigation: null,
+      gasSlowTicks: MOYA_EFFECT_TICKS - 1,
+    };
+  }
+
+  return { player: nextPlayer, damage, pushX, pushY };
+}
+
+function closestPlayerInTrapContact(
+  players: readonly [PlayerState, PlayerState],
+  trap: TrapState,
+): 0 | 1 | null {
+  const centerX = cellCenterUnits(trap.cellX);
+  const centerY = cellCenterUnits(trap.cellY);
+  const radiusSquared = trapContactRadius(trap) ** 2;
+  const candidates = ([0, 1] as const)
+    .filter((id) => players[id].disabledTicks === 0)
+    .map((id) => {
+      const dx = players[id].x - centerX;
+      const dy = players[id].y - centerY;
+      return { id, distance: dx * dx + dy * dy };
+    })
+    .filter((candidate) => candidate.distance <= radiusSquared)
+    .sort((first, second) => first.distance - second.distance || first.id - second.id);
+  return candidates[0]?.id ?? null;
+}
+
 function resolveTrapContacts(
   tick: number,
   players: readonly [PlayerState, PlayerState],
@@ -613,47 +689,9 @@ function resolveTrapContacts(
     const eventX = currentPlayer.x;
     const eventY = currentPlayer.y;
     const responsibleActor = parentEventId === null ? segment.sourceActor : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor);
-    const protectedTarget = currentPlayer.respawnInvulnerableTicks > 0;
-    let nextPlayer = currentPlayer;
-    let damage = 0;
-    let pushX = 0;
-    let pushY = 0;
-
-    if (!protectedTarget) {
-      if (trap.kind === 'bounce') {
-        nextPlayer = moveByDirection({ ...currentPlayer, placement: null, investigation: null }, trap.direction, BOUNCE_PUSH_UNITS, obstacles);
-        pushX = nextPlayer.x - currentPlayer.x;
-        pushY = nextPlayer.y - currentPlayer.y;
-      } else if (trap.kind === 'shock') {
-        damage = 18;
-        nextPlayer = moveAwayFromTrap({
-          ...currentPlayer,
-          hp: Math.max(0, currentPlayer.hp - damage),
-          placement: null,
-          investigation: null,
-        }, trap, SHOCK_PUSH_UNITS, obstacles);
-        pushX = nextPlayer.x - currentPlayer.x;
-        pushY = nextPlayer.y - currentPlayer.y;
-      } else if (trap.kind === 'hatch') {
-        damage = 26;
-        nextPlayer = {
-          ...currentPlayer,
-          hp: Math.max(0, currentPlayer.hp - damage),
-          disabledTicks: HATCH_DISABLED_TICKS,
-          placement: null,
-          investigation: null,
-        };
-      }
-    }
-
-    if (moyaActivation) {
-      nextPlayer = {
-        ...nextPlayer,
-        placement: null,
-        investigation: null,
-        gasSlowTicks: MOYA_EFFECT_TICKS - 1,
-      };
-    }
+    const effect = applyTrapEffect(currentPlayer, trap, obstacles);
+    const nextPlayer = effect.player;
+    const { damage, pushX, pushY } = effect;
 
     const event: TrapEvent = {
       id: eventId,
@@ -824,6 +862,58 @@ function resolveDelayedTrapEffects(
         };
       });
       remainingTraps = primedBombs;
+
+      const triggeredTraps = [...remainingTraps]
+        .filter((current) => {
+          if (current.kind === 'bomb' || current.armingTicks > 0 || (current.triggerTicks ?? 0) > 0 || (current.effectTicks ?? 0) > 0) return false;
+          const dx = cellCenterUnits(current.cellX) - centerX;
+          const dy = cellCenterUnits(current.cellY) - centerY;
+          return dx * dx + dy * dy <= chainRadiusSquared;
+        })
+        .sort((first, second) => first.id - second.id);
+      for (const triggeredTrap of triggeredTraps) {
+        if (!remainingTraps.some((current) => current.id === triggeredTrap.id)) continue;
+        const targetId = closestPlayerInTrapContact(nextPlayers, triggeredTrap);
+        if (targetId === null) continue;
+        const triggeredChainLength = eventChainLength + 1;
+        if (triggeredChainLength > MAX_CHAIN_TRAPS || existingEventCount + events.length >= MAX_EVENTS_PER_TICK) {
+          technicalInvalid = true;
+          break;
+        }
+
+        const currentPlayer = nextPlayers[targetId];
+        const effect = applyTrapEffect(currentPlayer, triggeredTrap, obstacles);
+        remainingTraps = triggeredTrap.kind === 'moya'
+          ? remainingTraps.map((current) => current.id === triggeredTrap.id
+            ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
+            : current)
+          : remainingTraps.filter((current) => current.id !== triggeredTrap.id);
+        const triggeredEvent: TrapEvent = {
+          id: eventId,
+          tick,
+          chainId: eventChainId,
+          parentEventId: explosionEventId,
+          chainLength: triggeredChainLength,
+          trapId: triggeredTrap.id,
+          owner: triggeredTrap.owner,
+          kind: triggeredTrap.kind,
+          target: targetId,
+          responsibleActor,
+          x: currentPlayer.x,
+          y: currentPlayer.y,
+          damage: effect.damage,
+          pushX: effect.pushX,
+          pushY: effect.pushY,
+        };
+        events.push(triggeredEvent);
+        eventId += 1;
+        nextPlayers[targetId] = effect.player;
+        maxChain = Math.max(maxChain, triggeredChainLength);
+        if (existingEventCount + events.length >= MAX_EVENT_LOG) {
+          technicalInvalid = true;
+          break;
+        }
+      }
     }
     if (technicalInvalid) break;
   }
