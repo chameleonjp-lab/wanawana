@@ -108,6 +108,43 @@ describe('fixed simulation', () => {
     expect(world.players[0].gear).toBe(2);
   });
 
+  it('cancels placement when investigation is deliberately started', () => {
+    const base = createWorld(125);
+    const enemyTrap: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'bounce',
+      direction: 0,
+      cellX: 3,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    let world: WorldState = {
+      ...base,
+      players: [{
+        ...base.players[0],
+        x: 21_600,
+        placement: {
+          kind: 'shock',
+          direction: 0,
+          cellX: 2,
+          cellY: 6,
+          remainingTicks: 12,
+        },
+      }, base.players[1]],
+      traps: [enemyTrap],
+      nextEntityId: 3,
+    };
+    world = advanceWorld(world, { investigate: true, investigateStart: true });
+    expect(world.players[0].placement).toBeNull();
+    expect(world.players[0].investigation?.mode).toBe('reveal');
+    expect(world.players[0].gear).toBe(3);
+    expect(world.trapsPlaced[0]).toBe(0);
+    expect(world.traps).toHaveLength(1);
+  });
+
   it('uses the declared gear cost and rejects a trap without enough gear', () => {
     let world = createWorld(121);
     world = advanceWorld(world, { placeTrap: 'shock' });

@@ -197,6 +197,16 @@ export function chooseCpuDecision(world: WorldState, difficulty: CpuDifficulty =
     return { command: command({}), reason: 'disabled', visibleTrapIds };
   }
   if (cpu.placement) {
+    // Setting a trap is interruptible: once the shared danger cue appears,
+    // the CPU must be able to abandon setup and investigate instead of being
+    // locked into a blind placement until completion.
+    if (hasDangerCue(cpu, world.traps) && isCpuReactionTick(world.tick, profile)) {
+      return {
+        command: command({ investigate: true, investigateStart: true }),
+        reason: 'investigating',
+        visibleTrapIds,
+      };
+    }
     return { command: command({}), reason: 'holding-placement', visibleTrapIds };
   }
   if (cpu.investigation) {
