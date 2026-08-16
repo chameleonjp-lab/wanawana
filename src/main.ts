@@ -2,6 +2,7 @@ import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
+import { OfflineUpdateManager } from './app/offline.ts';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
@@ -110,12 +111,15 @@ const resumeSummary = getElement<HTMLElement>('resume-summary');
 const resumeMatchButton = getElement<HTMLButtonElement>('resume-match-button');
 const discardResumeButton = getElement<HTMLButtonElement>('discard-resume-button');
 const controls = getElement<HTMLElement>('controls');
+const updateCard = getElement<HTMLElement>('update-card');
+const updateButton = getElement<HTMLButtonElement>('update-button');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
 let pixiApp: Application | null = null;
 let world: WorldState | null = null;
 let frameId = 0;
+let resizeFrameId: number | null = null;
 let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
@@ -132,6 +136,7 @@ let completedReplay: MatchReplay | null = null;
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
+const offlineUpdates = new OfflineUpdateManager();
 let contextRecoveryTimer: number | null = null;
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -154,6 +159,7 @@ function updateScreen(): void {
   status.textContent = state === 'battle' ? '固定tickで舞台を動かしています' : state === 'paused' ? '試合を停止しています' : '';
   updateTrapButtons();
   updateResumePanel();
+  updateOfflineCard();
 }
 
 function updateSoundButton(): void {
@@ -237,6 +243,10 @@ function updateSettingsNote(): void {
   settingsNote.textContent = settingsStorageAvailable
     ? '難度・舞台・罠ロードアウトは、この端末に保存されます。'
     : '設定を保存できない端末です。選んだ内容はこの画面を閉じると初期値へ戻ります。';
+}
+
+function updateOfflineCard(): void {
+  setVisible(updateCard, (machine.state === 'title' || machine.state === 'result') && offlineUpdates.state === 'ready');
 }
 
 function loadMatchSettings(): void {
@@ -397,6 +407,22 @@ function clearContextRecoveryTimer(): void {
   if (contextRecoveryTimer === null) return;
   window.clearTimeout(contextRecoveryTimer);
   contextRecoveryTimer = null;
+}
+
+function scheduleViewportRedraw(): void {
+  if (resizeFrameId !== null) window.cancelAnimationFrame(resizeFrameId);
+  resizeFrameId = window.requestAnimationFrame(() => {
+    resizeFrameId = null;
+    if (!world || !pixiApp || machine.state === 'title' || machine.state === 'unsupported') return;
+    updateHud();
+    drawWorld();
+  });
+}
+
+function handleViewportResize(message = '画面サイズが変わったため停止しました。表示が落ち着いてから再開してください。'): void {
+  inputController.reset();
+  if (machine.state === 'battle') pauseGame(message);
+  scheduleViewportRedraw();
 }
 
 function invalidateContextRecovery(message: string): void {
@@ -1005,6 +1031,7 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', () => returnToTitle());
   copyRecordButton.addEventListener('click', () => void copyMatchRecord());
+  updateButton.addEventListener('click', () => offlineUpdates.acceptUpdate());
 
   window.addEventListener('blur', () => {
     inputController.reset();
@@ -1021,9 +1048,14 @@ function bindEvents(): void {
     if (machine.state === 'battle') pauseGame('ページが隠れたため停止しました。');
   });
   window.addEventListener('orientationchange', () => {
-    inputController.reset();
-    if (machine.state === 'battle') pauseGame('縦向きに戻してから再開してください。');
+    handleViewportResize('画面の向きが変わったため停止しました。縦向きに戻してから再開してください。');
   });
+  window.addEventListener('resize', () => handleViewportResize());
+  window.visualViewport?.addEventListener('resize', () => handleViewportResize());
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(() => handleViewportResize());
+    observer.observe(arena);
+  }
 }
 
 bindEvents();
@@ -1036,6 +1068,8 @@ updateDifficultyLabel();
 updateLoadoutLabel();
 updateMapLabel();
 updateCareerSummary();
+offlineUpdates.addStateListener(updateOfflineCard);
+void offlineUpdates.register(BUILD_COMMIT, import.meta.env.BASE_URL);
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {
   machine.transition('unsupported');

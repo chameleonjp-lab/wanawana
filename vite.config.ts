@@ -1,9 +1,17 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig({
-  base: '/wanawana/',
-  build: {
-    target: 'es2022',
-    sourcemap: false,
-  },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', '');
+  const buildCommit = env.VITE_BUILD_COMMIT?.trim() || env.GITHUB_SHA?.trim() || 'local';
+  return {
+    base: '/wanawana/',
+    define: {
+      'import.meta.env.VITE_BUILD_COMMIT': JSON.stringify(buildCommit),
+    },
+    build: {
+      target: 'es2022',
+      sourcemap: false,
+      manifest: 'manifest.json',
+    },
+  };
 });
