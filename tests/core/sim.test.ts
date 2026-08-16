@@ -13,6 +13,7 @@ import {
   BOMB_TRIGGER_TICKS,
   DISARM_TICKS,
   FIRE_COOLDOWN_TICKS,
+  HATCH_RADIUS_UNITS,
   HATCH_DISABLED_TICKS,
   INVESTIGATE_TICKS,
   MAX_ACTIVE_TRAPS,
@@ -416,6 +417,34 @@ describe('fixed simulation', () => {
     const next = advanceWorld(world, { moveX: 1 });
 
     expect(next.events.map((event) => event.trapId)).toEqual([3, 2]);
+  });
+
+  it('records and resolves a trap at the first contact point on a movement segment', () => {
+    const base = createWorld(163);
+    const trap: TrapState = {
+      id: 2,
+      owner: 1,
+      kind: 'hatch',
+      direction: 0,
+      cellX: 3,
+      cellY: 6,
+      armingTicks: 0,
+      remainingTicks: 1_800,
+      discoveredBy: [false, true],
+    };
+    const startX = 28_800 - HATCH_RADIUS_UNITS - 1;
+    const world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: startX, y: 57_600 }, base.players[1]],
+      traps: [trap],
+      nextEntityId: 3,
+    };
+
+    const next = advanceWorld(world, { moveX: 1 });
+
+    expect(next.events[0]).toMatchObject({ trapId: 2, x: startX + 1, y: 57_600 });
+    expect(next.players[0].x).toBe(startX + 1);
+    expect(next.players[0].x).toBeLessThan(startX + 512);
   });
 
   it('connects a bounce into a shock trap within the same tick', () => {

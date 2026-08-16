@@ -536,6 +536,14 @@ function compareContactProgress(first: ContactProgress, second: ContactProgress)
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function pointAtContact(segment: TrapSegment, progress: ContactProgress): { x: number; y: number } {
+  if (progress.denominator <= 0) return { x: segment.startX, y: segment.startY };
+  return {
+    x: segment.startX + Math.trunc((segment.endX - segment.startX) * progress.numerator / progress.denominator),
+    y: segment.startY + Math.trunc((segment.endY - segment.startY) * progress.numerator / progress.denominator),
+  };
+}
+
 function trapContactRadius(trap: TrapState): number {
   if (trap.kind === 'bounce') return CELL_UNITS / 2;
   if (trap.kind === 'shock') return SHOCK_RADIUS_UNITS;
@@ -732,6 +740,7 @@ function resolveTrapContacts(
     const parentEventId = segment.parentEventId;
     const eventChainId = segment.chainId ?? chainId++;
     const eventChainLength = segment.chainLength + 1;
+    const contactPoint = pointAtContact(segment, candidate.progress);
     if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
     maxChain = Math.max(maxChain, eventChainLength);
 
@@ -750,6 +759,7 @@ function resolveTrapContacts(
             : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor),
         }
         : current);
+      nextPlayers[targetId] = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
       segments[targetId] = null;
       continue;
     }
@@ -764,9 +774,7 @@ function resolveTrapContacts(
       remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
     }
 
-    const currentPlayer = nextPlayers[targetId];
-    const eventX = currentPlayer.x;
-    const eventY = currentPlayer.y;
+    const currentPlayer = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
     const responsibleActor = parentEventId === null ? segment.sourceActor : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor);
     const effect = applyTrapEffect(currentPlayer, trap, obstacles);
     const nextPlayer = effect.player;
@@ -783,8 +791,8 @@ function resolveTrapContacts(
       kind: trap.kind,
       target: targetId,
       responsibleActor,
-      x: eventX,
-      y: eventY,
+      x: contactPoint.x,
+      y: contactPoint.y,
       damage,
       pushX,
       pushY,
@@ -868,6 +876,7 @@ function resolveDelayedTrapEffects(
       const parentEventId = segment.parentEventId;
       const eventChainId = segment.chainId ?? chainId++;
       const eventChainLength = segment.chainLength + 1;
+      const contactPoint = pointAtContact(segment, candidate.progress);
       if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
       maxChain = Math.max(maxChain, eventChainLength);
 
@@ -884,6 +893,7 @@ function resolveDelayedTrapEffects(
             triggerResponsibleActor: segment.sourceActor,
           }
           : current);
+        nextPlayers[targetId] = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
         continue;
       }
 
@@ -901,7 +911,7 @@ function resolveDelayedTrapEffects(
         remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
       }
 
-      const currentPlayer = nextPlayers[targetId];
+      const currentPlayer = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
       const effect = applyTrapEffect(currentPlayer, trap, obstacles);
       const event: TrapEvent = {
         id: eventId,
@@ -914,8 +924,8 @@ function resolveDelayedTrapEffects(
         kind: trap.kind,
         target: targetId,
         responsibleActor: segment.sourceActor,
-        x: currentPlayer.x,
-        y: currentPlayer.y,
+        x: contactPoint.x,
+        y: contactPoint.y,
         damage: effect.damage,
         pushX: effect.pushX,
         pushY: effect.pushY,
