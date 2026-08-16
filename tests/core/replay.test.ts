@@ -7,6 +7,7 @@ import {
   verifyReplayRecord,
   type MatchReplay,
 } from '../../src/core/replay.ts';
+import { BALANCE_CONFIG_HASH } from '../../src/core/balance.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 
 describe('deterministic match records', () => {
@@ -26,6 +27,7 @@ describe('deterministic match records', () => {
     expect(record).not.toBeNull();
     if (!record) return;
     expect(record.commands).toHaveLength(12);
+    expect(record.balanceConfigHash).toBe(BALANCE_CONFIG_HASH);
     expect(record.checkpoints.at(-1)?.tick).toBe(12);
     expect(record.finalHash).toBe(world.lastHash);
 

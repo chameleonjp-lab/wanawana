@@ -33,16 +33,16 @@ import {
   isTrapKind,
 } from './fixed.ts';
 import { hashText, hashWorld } from './hash.ts';
+import { BALANCE_CONFIG_HASH } from './balance.ts';
 import { getMapDefinition, isMapId } from './maps.ts';
 import { normalizeTrapLoadout } from './fixed.ts';
 
 export const RESUME_SCHEMA_VERSION = 1 as const;
-export const RESUME_ENGINE_VERSION = 'wanawana-resume-v1' as const;
+export const RESUME_ENGINE_VERSION = 'wanawana-resume-v2' as const;
 export const RESUME_PRNG_NAME = 'fixed-integer-v1' as const;
 export const RESUME_MAX_AGE_MS = 30 * 60 * 1_000;
 export const RESUME_MAX_JSON_BYTES = 2_000_000;
 
-const BALANCE_CONFIG_ID = 'wanawana-balance-v1';
 const HASH_PATTERN = /^[0-9a-f]{8}$/;
 const MAX_ID = 0xffff_ffff;
 const MAX_TIMER = MATCH_TICKS;
@@ -281,7 +281,7 @@ function isResume(value: unknown): value is MatchResume {
     || resume.engineVersion !== RESUME_ENGINE_VERSION
     || typeof resume.balanceConfigHash !== 'string'
     || !HASH_PATTERN.test(resume.balanceConfigHash)
-    || resume.balanceConfigHash !== hashText(BALANCE_CONFIG_ID)
+    || resume.balanceConfigHash !== BALANCE_CONFIG_HASH
     || typeof resume.mapHash !== 'string'
     || !HASH_PATTERN.test(resume.mapHash)
     || resume.prngName !== RESUME_PRNG_NAME
@@ -301,7 +301,7 @@ export function createMatchResume(
   return {
     schemaVersion: RESUME_SCHEMA_VERSION,
     engineVersion: RESUME_ENGINE_VERSION,
-    balanceConfigHash: hashText(BALANCE_CONFIG_ID),
+    balanceConfigHash: BALANCE_CONFIG_HASH,
     mapHash: mapHash(world.mapId),
     prngName: RESUME_PRNG_NAME,
     savedAtMs,

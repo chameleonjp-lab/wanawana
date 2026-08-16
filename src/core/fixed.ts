@@ -57,7 +57,7 @@ export const RESPAWN_INVULNERABLE_TICKS = 30;
 export const MAX_CHAIN_TRAPS = 8;
 export const MAX_EVENTS_PER_TICK = 128;
 export const MAX_EVENT_LOG = 50_000;
-const COLLISION_SEARCH_STEP_UNITS = 512;
+export const COLLISION_SEARCH_STEP_UNITS = 512;
 
 export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
   bounce: 1,
