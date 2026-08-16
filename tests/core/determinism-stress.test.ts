@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import { describe, expect, it } from 'vitest';
 import { GEAR_MAX, MAX_ACTIVE_TRAPS, MAX_EVENT_LOG } from '../../src/core/fixed.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
@@ -11,7 +13,10 @@ import {
   type WorldState,
 } from '../../src/core/types.ts';
 
-const SEED_COUNT = 10_000;
+const configuredSeedCount = Number.parseInt(import.meta.env.VITE_DETERMINISM_SEEDS ?? '10000', 10);
+const SEED_COUNT = Number.isSafeInteger(configuredSeedCount) && configuredSeedCount >= 10_000
+  ? configuredSeedCount
+  : 10_000;
 const TICKS_PER_SEED = 4;
 
 function mix32(value: number): number {
@@ -130,6 +135,6 @@ describe('determinism stress invariants', () => {
         }
       }
     }
-    expect(SEED_COUNT).toBe(10_000);
+    expect(SEED_COUNT).toBeGreaterThanOrEqual(10_000);
   }, 60_000);
 });
