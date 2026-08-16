@@ -95,6 +95,10 @@ export class InputController {
       }
     }
     this.pointers.clear();
+    this.cancelPendingCommands();
+  }
+
+  private cancelPendingCommands(): void {
     this.pressedKeys.clear();
     this.fireKeyArmed = false;
     this.firePending = false;
@@ -240,22 +244,14 @@ export class InputController {
   };
 
   private handlePointerCancel = (event: PointerEvent): void => {
-    const pointer = this.pointers.get(event.pointerId);
-    if (!pointer) return;
-    if (pointer.role === 'inspect') this.investigateHeld = false;
-    if (pointer.role === 'trap') this.trapPreview = null;
-    if (pointer.role === 'trap') this.trapPreviewCell = null;
-    this.releasePointer(event.pointerId, pointer);
+    if (!this.pointers.has(event.pointerId)) return;
+    this.reset();
     event.preventDefault();
   };
 
   private handleLostPointerCapture = (event: PointerEvent): void => {
-    const pointer = this.pointers.get(event.pointerId);
-    if (!pointer) return;
-    if (pointer.role === 'inspect') this.investigateHeld = false;
-    if (pointer.role === 'trap') this.trapPreview = null;
-    if (pointer.role === 'trap') this.trapPreviewCell = null;
-    this.pointers.delete(event.pointerId);
+    if (!this.pointers.has(event.pointerId)) return;
+    this.reset();
   };
 
   private releasePointer(pointerId: number, pointer: ActivePointer): void {
