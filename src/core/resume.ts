@@ -23,6 +23,7 @@ import {
   GEAR_RECOVERY_TICKS,
   INVESTIGATION_PAUSE_TICKS,
   INVESTIGATE_TICKS,
+  MAX_ACTIVE_TRAPS,
   MAX_EVENT_LOG,
   PUSH_IMMUNITY_TICKS,
   RESPAWN_INVULNERABLE_TICKS,
@@ -145,7 +146,7 @@ function isPlayer(value: unknown, id: 0 | 1): value is PlayerState {
 function isShot(value: unknown): value is ShotState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const shot = value as Record<string, unknown>;
-  return isSafeInteger(shot.id, 1, MAX_ID)
+  return isSafeInteger(shot.id, 2, MAX_ID)
     && (shot.owner === 0 || shot.owner === 1)
     && isFiniteInteger(shot.x, -CELL_UNITS, ARENA_WIDTH_CELLS * CELL_UNITS + CELL_UNITS)
     && isFiniteInteger(shot.y, -CELL_UNITS, ARENA_HEIGHT_CELLS * CELL_UNITS + CELL_UNITS)
@@ -165,7 +166,7 @@ function isNullableInteger(value: unknown, minimum: number, maximum: number): bo
 function isTrap(value: unknown): value is TrapState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const trap = value as Record<string, unknown>;
-  return isSafeInteger(trap.id, 1, MAX_ID)
+  return isSafeInteger(trap.id, 2, MAX_ID)
     && (trap.owner === 0 || trap.owner === 1)
     && isTrapValue(trap.kind)
     && isDirection(trap.direction)
@@ -236,7 +237,7 @@ function isWorld(value: unknown): value is WorldState {
     || !Array.isArray(world.traps)
     || world.traps.length > 16
     || !world.traps.every(isTrap)
-    || !isSafeInteger(world.nextEntityId, 1, MAX_ID)
+    || !isSafeInteger(world.nextEntityId, 2, MAX_ID)
     || !Array.isArray(world.shotsFired)
     || world.shotsFired.length !== 2
     || !world.shotsFired.every((value) => isSafeInteger(value, 0, MATCH_TICKS))
@@ -259,6 +260,47 @@ function isWorld(value: unknown): value is WorldState {
   }
 
   const typedWorld = world as unknown as WorldState;
+  const entityIds = new Set<number>();
+  let highestEntityId = 1;
+  const trapsByOwner: [number, number] = [0, 0];
+  for (const entity of [...typedWorld.traps, ...typedWorld.shots]) {
+    if (entityIds.has(entity.id)) return false;
+    entityIds.add(entity.id);
+    highestEntityId = Math.max(highestEntityId, entity.id);
+  }
+  if (typedWorld.nextEntityId <= highestEntityId) return false;
+  for (const trap of typedWorld.traps) {
+    trapsByOwner[trap.owner] += 1;
+    if (trapsByOwner[trap.owner] > MAX_ACTIVE_TRAPS) return false;
+  }
+
+  const eventIds = new Set<number>();
+  let highestEventId = 0;
+  let highestChainId = 0;
+  let highestChainLength = 0;
+  for (const event of typedWorld.events) {
+    if (eventIds.has(event.id) || event.tick > typedWorld.tick) return false;
+    eventIds.add(event.id);
+    highestEventId = Math.max(highestEventId, event.id);
+    highestChainId = Math.max(highestChainId, event.chainId);
+    highestChainLength = Math.max(highestChainLength, event.chainLength);
+    if (event.parentEventId !== null && !eventIds.has(event.parentEventId)) return false;
+  }
+  if (typedWorld.nextEventId <= highestEventId || typedWorld.nextChainId <= highestChainId) return false;
+  if (typedWorld.maxChain < highestChainLength) return false;
+  for (const trap of typedWorld.traps) {
+    if (trap.triggerParentEventId !== undefined
+      && trap.triggerParentEventId !== null
+      && !eventIds.has(trap.triggerParentEventId)) return false;
+    if (trap.triggerChainId !== undefined
+      && trap.triggerChainId !== null
+      && trap.triggerChainId >= typedWorld.nextChainId) return false;
+  }
+  for (const player of typedWorld.players) {
+    if (player.investigation && !typedWorld.traps.some((trap) => trap.id === player.investigation?.targetTrapId)) {
+      return false;
+    }
+  }
   const normalizedLoadouts = [
     normalizeTrapLoadout(typedWorld.loadouts[0]),
     normalizeTrapLoadout(typedWorld.loadouts[1]),
