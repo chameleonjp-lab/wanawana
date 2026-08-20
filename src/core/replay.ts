@@ -184,6 +184,8 @@ function isReplayRecord(value: unknown): value is MatchReplay {
     || !record.checkpoints.every((checkpoint) => checkpoint.tick <= (record.commands as readonly unknown[]).length)
     || !record.checkpoints.every((checkpoint, index, checkpoints) => index === 0 || checkpoint.tick > checkpoints[index - 1].tick)
     || (record.finalHash !== null && (typeof record.finalHash !== 'string' || !HASH_PATTERN.test(record.finalHash)))
+    || (record.result !== null && record.result === 'technical-invalid')
+    || (record.result !== null && record.finalHash === null)
     || (record.finalHash !== null && record.checkpoints[record.checkpoints.length - 1]?.tick !== record.commands.length)
     || !isMatchResult(record.result)) {
     return false;
