@@ -71,6 +71,26 @@ describe('deterministic match records', () => {
     expect(recorder.finish(invalidWorld)).toBeNull();
   });
 
+  it('rejects records that claim a result without a final hash or share a technical stop', () => {
+    const initial = createWorld(82);
+    const recorder = new ReplayRecorder(initial);
+    const world = advanceWorld(initial, { moveX: 1 });
+    recorder.recordTick({ moveX: 1 }, {}, world);
+    const record = recorder.finish(world);
+    expect(record).not.toBeNull();
+    if (!record) return;
+
+    expect(readReplayRecord(JSON.stringify({
+      ...record,
+      result: 'player-win',
+      finalHash: null,
+    }))).toBeNull();
+    expect(readReplayRecord(JSON.stringify({
+      ...record,
+      result: 'technical-invalid',
+    }))).toBeNull();
+  });
+
   it('reports the first checkpoint mismatch', () => {
     const initial = createWorld(79);
     const recorder = new ReplayRecorder(initial);
