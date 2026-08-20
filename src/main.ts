@@ -22,7 +22,9 @@ import {
 import { buildMatchReport, chainHeading, type MatchReport } from './core/result.ts';
 import {
   ReplayRecorder,
+  readReplayRecord,
   serializeReplayRecord,
+  verifyReplayRecord,
   type MatchReplay,
 } from './core/replay.ts';
 import { getMapDefinition } from './core/maps.ts';
@@ -110,6 +112,9 @@ const resumeCard = getElement<HTMLElement>('resume-card');
 const resumeSummary = getElement<HTMLElement>('resume-summary');
 const resumeMatchButton = getElement<HTMLButtonElement>('resume-match-button');
 const discardResumeButton = getElement<HTMLButtonElement>('discard-resume-button');
+const replayInput = getElement<HTMLTextAreaElement>('replay-input');
+const replayVerifyButton = getElement<HTMLButtonElement>('replay-verify-button');
+const replayVerifyStatus = getElement<HTMLElement>('replay-verify-status');
 const controls = getElement<HTMLElement>('controls');
 const updateCard = getElement<HTMLElement>('update-card');
 const updateButton = getElement<HTMLButtonElement>('update-button');
@@ -912,6 +917,21 @@ async function copyMatchRecord(): Promise<void> {
   }
 }
 
+function verifyPastedReplay(): void {
+  const record = readReplayRecord(replayInput.value.trim());
+  if (!record) {
+    replayVerifyStatus.textContent = '記録を読み込めません。コピーしたJSON全体を貼り付けてください。';
+    return;
+  }
+  const verification = verifyReplayRecord(record);
+  if (verification.valid) {
+    replayVerifyStatus.textContent = `検査に成功しました。${verification.world.tick}tick分の状態ハッシュが一致しています。`;
+    return;
+  }
+  const mismatch = verification.mismatchTick === null ? '' : `（不一致: ${verification.mismatchTick}tick）`;
+  replayVerifyStatus.textContent = `検査に失敗しました${mismatch}。${verification.reason ?? '現在のルールでは再現できません。'}`;
+}
+
 async function resumeBattle(): Promise<void> {
   if (!resumeSnapshot) return;
   const snapshot = resumeSnapshot;
@@ -1019,6 +1039,7 @@ function bindEvents(): void {
   resetSettingsButton.addEventListener('click', resetMatchSettings);
   resumeMatchButton.addEventListener('click', () => void resumeBattle());
   discardResumeButton.addEventListener('click', discardResume);
+  replayVerifyButton.addEventListener('click', verifyPastedReplay);
   difficultySelect.addEventListener('change', () => {
     updateDifficultyLabel();
     persistMatchSettings();
