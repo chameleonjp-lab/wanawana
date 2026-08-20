@@ -107,6 +107,13 @@ describe('interrupted match resume records', () => {
     });
     expect(readMatchResume(serializeMatchResume(duplicateEntity), 40_001)).toBeNull();
 
+    const reservedEntityId = withRehashedWorld(saved, {
+      ...saved.world,
+      traps: [{ ...activeTrap, id: 1 }],
+      nextEntityId: 2,
+    });
+    expect(readMatchResume(serializeMatchResume(reservedEntityId), 40_001)).toBeNull();
+
     const danglingInvestigation = withRehashedWorld(saved, {
       ...saved.world,
       players: [

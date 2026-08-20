@@ -146,7 +146,7 @@ function isPlayer(value: unknown, id: 0 | 1): value is PlayerState {
 function isShot(value: unknown): value is ShotState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const shot = value as Record<string, unknown>;
-  return isSafeInteger(shot.id, 1, MAX_ID)
+  return isSafeInteger(shot.id, 2, MAX_ID)
     && (shot.owner === 0 || shot.owner === 1)
     && isFiniteInteger(shot.x, -CELL_UNITS, ARENA_WIDTH_CELLS * CELL_UNITS + CELL_UNITS)
     && isFiniteInteger(shot.y, -CELL_UNITS, ARENA_HEIGHT_CELLS * CELL_UNITS + CELL_UNITS)
@@ -166,7 +166,7 @@ function isNullableInteger(value: unknown, minimum: number, maximum: number): bo
 function isTrap(value: unknown): value is TrapState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const trap = value as Record<string, unknown>;
-  return isSafeInteger(trap.id, 1, MAX_ID)
+  return isSafeInteger(trap.id, 2, MAX_ID)
     && (trap.owner === 0 || trap.owner === 1)
     && isTrapValue(trap.kind)
     && isDirection(trap.direction)
@@ -237,7 +237,7 @@ function isWorld(value: unknown): value is WorldState {
     || !Array.isArray(world.traps)
     || world.traps.length > 16
     || !world.traps.every(isTrap)
-    || !isSafeInteger(world.nextEntityId, 1, MAX_ID)
+    || !isSafeInteger(world.nextEntityId, 2, MAX_ID)
     || !Array.isArray(world.shotsFired)
     || world.shotsFired.length !== 2
     || !world.shotsFired.every((value) => isSafeInteger(value, 0, MATCH_TICKS))
