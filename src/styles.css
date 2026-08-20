@@ -85,6 +85,14 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .resume-card p { margin: 0; color: #cfc3df; font-size: .74rem; line-height: 1.5; }
 .resume-card .secondary-button { margin-top: 8px; }
 .resume-card .text-button { justify-self: start; margin-top: 2px; padding: 0; min-height: 30px; font-size: .72rem; }
+.replay-verify-card { display: grid; gap: 8px; margin-top: 12px; padding: 14px; border: 1px solid #5a4c78; border-radius: 14px; background: #211a37; text-align: left; }
+.replay-verify-card summary { cursor: pointer; color: #f7f1e7; font-weight: 800; }
+.replay-verify-card p { margin: 0; color: #cfc3df; font-size: .74rem; line-height: 1.5; }
+.replay-verify-card label { color: #f7f1e7; font-size: .76rem; font-weight: 700; }
+.replay-verify-card textarea { width: 100%; min-height: 130px; resize: vertical; border: 1px solid #725f97; border-radius: 10px; padding: 10px; color: #f7f1e7; background: #161326; font: .7rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.replay-verify-card textarea:focus-visible { outline: 3px solid #ffd37a; outline-offset: 2px; }
+.replay-verify-card .secondary-button { margin-top: 2px; }
+.replay-verify-status { min-height: 1.5em; }
 
 .battle-screen { padding: clamp(14px, 3vw, 24px); }
 .battle-heading-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

@@ -87,6 +87,14 @@
           <button id="resume-match-button" class="secondary-button" type="button">中断した試合を再開</button>
           <button id="discard-resume-button" class="text-button" type="button">中断記録を破棄</button>
         </div>
+        <details id="replay-verify-card" class="replay-verify-card">
+          <summary>対戦記録を検査する</summary>
+          <p>別の端末からコピーしたJSONを貼り付けると、現在のルールで最後まで再現できるか確認します。</p>
+          <label for="replay-input">対戦記録</label>
+          <textarea id="replay-input" rows="7" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="コピーした対戦記録をここへ貼り付け"></textarea>
+          <button id="replay-verify-button" class="secondary-button" type="button">記録を検査</button>
+          <p id="replay-verify-status" class="replay-verify-status" aria-live="polite"></p>
+        </details>
         <button id="start-button" class="primary-button" type="button">舞台に入る</button>
       </section>
 
