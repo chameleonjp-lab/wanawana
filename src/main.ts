@@ -16,6 +16,7 @@ import {
   INVESTIGATE_RADIUS_UNITS,
   isTrapKind,
   MOYA_RADIUS_UNITS,
+  TRAP_LIFETIME_TICKS,
   normalizeTrapLoadout,
   snapToCell,
 } from './core/fixed.ts';
@@ -28,6 +29,7 @@ import {
   type MatchReplay,
 } from './core/replay.ts';
 import { getMapDefinition } from './core/maps.ts';
+import { hashWorld } from './core/hash.ts';
 import {
   emptyMatchSummary,
   readMatchSummary,
@@ -48,6 +50,14 @@ import {
   serializeMatchResume,
   type MatchResume,
 } from './core/resume.ts';
+import {
+  advanceTutorial,
+  createTutorialState,
+  tutorialHint,
+  tutorialStepInstruction,
+  tutorialStepTitle,
+  type TutorialState,
+} from './core/tutorial.ts';
 import { advanceWorld, createWorld } from './core/sim.ts';
 import {
   ARENA_HEIGHT_CELLS,
@@ -60,6 +70,7 @@ import {
   type InputCommand,
   type TrapKind,
   type TrapLoadout,
+  type TrapState,
   type WorldState,
 } from './core/types.ts';
 import { InputController } from './input/controller.ts';
@@ -69,6 +80,7 @@ const MAX_TICKS_PER_FRAME = 5;
 const MAX_BACKLOG_TICKS = 8;
 const CONTEXT_RECOVERY_TIMEOUT_MS = 5_000;
 const RESUME_STORAGE_KEY = 'wanawana:v1:resume';
+const TUTORIAL_STORAGE_KEY = 'wanawana:v1:tutorial';
 const RESUME_SAVE_INTERVAL_TICKS = 2 * TICK_RATE;
 
 const machine = new AppStateMachine();
@@ -108,6 +120,17 @@ const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
 const settingsNote = getElement<HTMLElement>('settings-note');
 const resetSettingsButton = getElement<HTMLButtonElement>('reset-settings');
+const practiceEntryNote = getElement<HTMLElement>('practice-entry-note');
+const practiceButton = getElement<HTMLButtonElement>('practice-button');
+const tutorialCard = getElement<HTMLElement>('tutorial-card');
+const tutorialHeading = getElement<HTMLElement>('tutorial-heading');
+const tutorialInstruction = getElement<HTMLElement>('tutorial-instruction');
+const tutorialHintElement = getElement<HTMLElement>('tutorial-hint');
+const tutorialProgressBar = getElement<HTMLElement>('tutorial-progress-bar');
+const tutorialCompleteActions = getElement<HTMLElement>('tutorial-complete-actions');
+const practiceQuitButton = getElement<HTMLButtonElement>('practice-quit-button');
+const practiceStartMatchButton = getElement<HTMLButtonElement>('practice-start-match-button');
+const practiceTitleButton = getElement<HTMLButtonElement>('practice-title-button');
 const resumeCard = getElement<HTMLElement>('resume-card');
 const resumeSummary = getElement<HTMLElement>('resume-summary');
 const resumeMatchButton = getElement<HTMLButtonElement>('resume-match-button');
@@ -116,6 +139,7 @@ const replayInput = getElement<HTMLTextAreaElement>('replay-input');
 const replayVerifyButton = getElement<HTMLButtonElement>('replay-verify-button');
 const replayVerifyStatus = getElement<HTMLElement>('replay-verify-status');
 const controls = getElement<HTMLElement>('controls');
+const pauseButton = getElement<HTMLButtonElement>('pause-button');
 const updateCard = getElement<HTMLElement>('update-card');
 const updateButton = getElement<HTMLButtonElement>('update-button');
 
@@ -138,6 +162,11 @@ let resumeStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
 let replayRecorder: ReplayRecorder | null = null;
 let completedReplay: MatchReplay | null = null;
+let practiceMode = false;
+let practiceComplete = false;
+let tutorialState: TutorialState = createTutorialState();
+let tutorialStorageAvailable = true;
+let tutorialCompleted = false;
 const inputController = new InputController(controls);
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
@@ -161,8 +190,16 @@ function updateScreen(): void {
   setVisible(battleView, state === 'battle');
   setVisible(pauseView, state === 'paused');
   setVisible(resultView, state === 'result');
-  status.textContent = state === 'battle' ? '固定tickで舞台を動かしています' : state === 'paused' ? '試合を停止しています' : '';
+  setVisible(tutorialCard, state === 'battle' && practiceMode);
+  status.textContent = state === 'battle'
+    ? practiceMode
+      ? practiceComplete ? '練習を完了しました' : '操作練習を固定tickで進めています'
+      : '固定tickで舞台を動かしています'
+    : state === 'paused' ? '試合を停止しています' : '';
   updateTrapButtons();
+  updateTutorialCard();
+  practiceButton.disabled = state !== 'title';
+  pauseButton.disabled = practiceMode && practiceComplete;
   updateResumePanel();
   updateOfflineCard();
 }
@@ -248,6 +285,54 @@ function updateSettingsNote(): void {
   settingsNote.textContent = settingsStorageAvailable
     ? '難度・舞台・罠ロードアウトは、この端末に保存されます。'
     : '設定を保存できない端末です。選んだ内容はこの画面を閉じると初期値へ戻ります。';
+}
+
+function updatePracticeEntry(): void {
+  practiceEntryNote.textContent = tutorialCompleted
+    ? '練習済みです。必要なときは何度でもやり直せます。'
+    : '60〜90秒の練習で、移動・射撃・罠の連鎖・調査解除を実際に試せます。';
+  practiceButton.textContent = tutorialCompleted ? '操作をもう一度練習する' : '操作を練習する';
+}
+
+function updateTutorialCard(): void {
+  if (!practiceMode) return;
+  if (practiceComplete || tutorialState.completed) {
+    tutorialHeading.textContent = '練習完了';
+    tutorialInstruction.textContent = '4つの操作を試せました。本戦では、相手を罠へ誘い込んでみましょう。';
+    tutorialHintElement.classList.add('is-hidden');
+    tutorialCompleteActions.classList.remove('is-hidden');
+    tutorialProgressBar.style.width = '100%';
+    practiceQuitButton.disabled = true;
+    return;
+  }
+  tutorialHeading.textContent = `${tutorialState.step} / 4　${tutorialStepTitle(tutorialState.step)}`;
+  tutorialInstruction.textContent = tutorialStepInstruction(tutorialState.step);
+  tutorialHintElement.textContent = tutorialState.hintVisible ? tutorialHint(tutorialState.step) : '';
+  tutorialHintElement.classList.toggle('is-hidden', !tutorialState.hintVisible);
+  tutorialCompleteActions.classList.add('is-hidden');
+  tutorialProgressBar.style.width = `${tutorialState.step * 25}%`;
+  practiceQuitButton.disabled = false;
+}
+
+function loadTutorialCompletion(): void {
+  try {
+    tutorialCompleted = window.localStorage.getItem(TUTORIAL_STORAGE_KEY) === 'done';
+  } catch {
+    tutorialStorageAvailable = false;
+    tutorialCompleted = false;
+  }
+  updatePracticeEntry();
+}
+
+function persistTutorialCompletion(): void {
+  if (!tutorialStorageAvailable) return;
+  try {
+    window.localStorage.setItem(TUTORIAL_STORAGE_KEY, 'done');
+    tutorialCompleted = true;
+  } catch {
+    tutorialStorageAvailable = false;
+  }
+  updatePracticeEntry();
 }
 
 function updateOfflineCard(): void {
@@ -360,7 +445,7 @@ function clearResumeSnapshot(): void {
 }
 
 function persistResumeSnapshot(): void {
-  if (!resumeStorageAvailable || !world || machine.state === 'result' || world.phase !== 'battle') return;
+  if (practiceMode || !resumeStorageAvailable || !world || machine.state === 'result' || world.phase !== 'battle') return;
   try {
     const snapshot = createMatchResume(world, cpuDifficulty, Date.now());
     window.localStorage.setItem(RESUME_STORAGE_KEY, serializeMatchResume(snapshot));
@@ -384,7 +469,7 @@ function recordFinishedMatch(report: MatchReport): void {
 }
 
 function updateTrapButtons(): void {
-  const active = machine.state === 'battle';
+  const active = machine.state === 'battle' && !practiceComplete;
   const buttons = controls.querySelectorAll<HTMLButtonElement>('[data-input-role^="trap-"]');
   for (const button of buttons) {
     const rawKind = button.dataset.inputRole?.slice(5);
@@ -733,6 +818,81 @@ function hasDangerCue(
   });
 }
 
+function cellIsOpen(world: WorldState, cellX: number, cellY: number): boolean {
+  if (cellX < 0 || cellX >= ARENA_WIDTH_CELLS || cellY < 0 || cellY >= ARENA_HEIGHT_CELLS) return false;
+  if (getMapDefinition(world.mapId).obstacleCells.some((obstacle) => obstacle.cellX === cellX && obstacle.cellY === cellY)) return false;
+  return !world.traps.some((trap) => trap.cellX === cellX && trap.cellY === cellY);
+}
+
+function tutorialTrap(
+  id: number,
+  owner: 0 | 1,
+  kind: TrapKind,
+  cellX: number,
+  cellY: number,
+  discoveredBy: readonly [boolean, boolean],
+  direction: 0 | 1 | 2 | 3 = 0,
+): TrapState {
+  return {
+    id,
+    owner,
+    kind,
+    direction,
+    cellX,
+    cellY,
+    armingTicks: 0,
+    remainingTicks: TRAP_LIFETIME_TICKS,
+    discoveredBy,
+    triggerTicks: 0,
+    effectTicks: 0,
+  };
+}
+
+/** Add a visible practice track after the player has completed the preceding step. */
+function prepareTutorialStage(nextWorld: WorldState, step: 3 | 4): WorldState {
+  if (step === 3 && nextWorld.traps.some((trap) => trap.owner === 1 && trap.kind === 'bounce')) return nextWorld;
+  if (step === 4 && nextWorld.traps.some((trap) => trap.owner === 1 && !trap.discoveredBy[0])) return nextWorld;
+
+  const playerCellX = snapToCell(nextWorld.players[0].x, ARENA_WIDTH_CELLS);
+  const playerCellY = snapToCell(nextWorld.players[0].y, ARENA_HEIGHT_CELLS);
+  if (step === 3) {
+    const candidates = [
+      { direction: 1 as const, firstX: playerCellX + 1, secondX: playerCellX + 3 },
+      { direction: 3 as const, firstX: playerCellX - 1, secondX: playerCellX - 3 },
+      { direction: 2 as const, firstX: playerCellY + 1, secondX: playerCellY + 3 },
+      { direction: 0 as const, firstX: playerCellY - 1, secondX: playerCellY - 3 },
+    ];
+    const track = candidates.find((candidate) => {
+      const firstX = candidate.direction === 1 || candidate.direction === 3 ? candidate.firstX : playerCellX;
+      const firstY = candidate.direction === 2 || candidate.direction === 0 ? candidate.firstX : playerCellY;
+      const secondX = candidate.direction === 1 || candidate.direction === 3 ? candidate.secondX : playerCellX;
+      const secondY = candidate.direction === 2 || candidate.direction === 0 ? candidate.secondX : playerCellY;
+      return cellIsOpen(nextWorld, firstX, firstY) && cellIsOpen(nextWorld, secondX, secondY);
+    });
+    if (!track) return nextWorld;
+    const firstX = track.direction === 1 || track.direction === 3 ? track.firstX : playerCellX;
+    const firstY = track.direction === 2 || track.direction === 0 ? track.firstX : playerCellY;
+    const secondX = track.direction === 1 || track.direction === 3 ? track.secondX : playerCellX;
+    const secondY = track.direction === 2 || track.direction === 0 ? track.secondX : playerCellY;
+    const first = tutorialTrap(nextWorld.nextEntityId, 1, 'bounce', firstX, firstY, [true, true], track.direction);
+    const second = tutorialTrap(nextWorld.nextEntityId + 1, 1, 'shock', secondX, secondY, [true, true], track.direction);
+    const prepared = { ...nextWorld, traps: [...nextWorld.traps, first, second], nextEntityId: nextWorld.nextEntityId + 2, lastHash: '' };
+    return { ...prepared, lastHash: hashWorld(prepared) };
+  }
+
+  const nearby = [
+    [playerCellX + 1, playerCellY],
+    [playerCellX - 1, playerCellY],
+    [playerCellX, playerCellY + 1],
+    [playerCellX, playerCellY - 1],
+  ].find(([cellX, cellY]) => cellIsOpen(nextWorld, cellX, cellY));
+  if (!nearby) return nextWorld;
+  const [cellX, cellY] = nearby;
+  const trap = tutorialTrap(nextWorld.nextEntityId, 1, 'hatch', cellX, cellY, [false, true]);
+  const prepared = { ...nextWorld, traps: [...nextWorld.traps, trap], nextEntityId: nextWorld.nextEntityId + 1, lastHash: '' };
+  return { ...prepared, lastHash: hashWorld(prepared) };
+}
+
 function trapColor(kind: TrapKind): number {
   if (kind === 'bounce') return 0x8cbdff;
   if (kind === 'shock') return 0xffdc73;
@@ -778,9 +938,23 @@ function loop(timestamp: number): void {
   let processed = 0;
   while (accumulator >= FRAME_MS && processed < MAX_TICKS_PER_FRAME) {
     const playerInput = readInput();
-    const cpuDecision = chooseCpuDecision(world, cpuDifficulty);
+    const cpuDecision = practiceMode ? { command: {} as InputCommand } : chooseCpuDecision(world, cpuDifficulty);
     const previousWorld = world;
     world = advanceWorld(world, playerInput, cpuDecision.command);
+    if (practiceMode) {
+      const tutorialUpdate = advanceTutorial(tutorialState, previousWorld, world);
+      tutorialState = tutorialUpdate.state;
+      if (tutorialUpdate.advanced && (tutorialState.step === 3 || tutorialState.step === 4)) {
+        world = prepareTutorialStage(world, tutorialState.step);
+      }
+      if (tutorialState.completed) {
+        practiceComplete = true;
+        persistTutorialCompletion();
+        inputController.deactivate();
+        soundEngine.suspend();
+        updateScreen();
+      }
+    }
     replayRecorder?.recordTick(playerInput, cpuDecision.command, world);
     soundEngine.syncWorld(previousWorld, world);
     if (world.tick % RESUME_SAVE_INTERVAL_TICKS === 0 && world.phase === 'battle') persistResumeSnapshot();
@@ -790,6 +964,8 @@ function loop(timestamp: number): void {
 
   updateHud();
   drawWorld();
+  updateTutorialCard();
+  if (practiceMode && practiceComplete) return;
   if (world.phase === 'result') {
     finishBattle();
     return;
@@ -891,6 +1067,10 @@ function finishBattle(): void {
   cancelAnimationFrame(frameId);
   clearContextRecoveryTimer();
   contextRecovery.endMatch();
+  if (practiceMode) {
+    stopPractice('練習時間が終了しました。もう一度やってみましょう。');
+    return;
+  }
   clearResumeSnapshot();
   inputController.deactivate();
   if (!world) return;
@@ -987,7 +1167,58 @@ function discardResume(): void {
   status.textContent = '中断した試合を破棄しました。';
 }
 
+async function startPractice(): Promise<void> {
+  const ready = await ensurePixi();
+  if (!ready) return;
+  const soundReady = await soundEngine.resume();
+  practiceMode = true;
+  practiceComplete = false;
+  tutorialState = createTutorialState();
+  selectedLoadout = DEFAULT_TRAP_LOADOUT;
+  selectedMap = DEFAULT_MAP_ID;
+  inputController.setTrapLoadout(selectedLoadout);
+  clearResumeSnapshot();
+  contextRecovery.startMatch();
+  world = createWorld(0x57414e41, selectedLoadout, selectedLoadout, selectedMap);
+  summaryRecordedWorld = null;
+  replayRecorder = null;
+  completedReplay = null;
+  inputController.activate();
+  machine.transition('battle');
+  updateScreen();
+  updateHud();
+  drawWorld();
+  if (!soundReady) status.textContent = '音なしで練習を続けます。';
+  startLoop();
+}
+
+function stopPractice(message = '練習を終了しました。'): void {
+  if (!practiceMode) return;
+  cancelAnimationFrame(frameId);
+  inputController.deactivate();
+  soundEngine.suspend();
+  contextRecovery.endMatch();
+  practiceMode = false;
+  practiceComplete = false;
+  tutorialState = createTutorialState();
+  world = null;
+  replayRecorder = null;
+  completedReplay = null;
+  if (machine.state === 'battle' || machine.state === 'paused') machine.transition('title');
+  updateScreen();
+  status.textContent = message;
+}
+
+async function startMatchFromPractice(): Promise<void> {
+  if (!practiceMode || !practiceComplete) return;
+  stopPractice('本戦を準備しています。');
+  await startBattle();
+}
+
 async function startBattle(): Promise<void> {
+  practiceMode = false;
+  practiceComplete = false;
+  tutorialState = createTutorialState();
   updateDifficultyLabel();
   updateLoadoutLabel();
   updateMapLabel();
@@ -1028,6 +1259,9 @@ function returnToTitle(message = ''): void {
   world = null;
   replayRecorder = null;
   completedReplay = null;
+  practiceMode = false;
+  practiceComplete = false;
+  tutorialState = createTutorialState();
   if (machine.state === 'battle' || machine.state === 'paused' || machine.state === 'result') {
     machine.transition('title');
   }
@@ -1037,6 +1271,7 @@ function returnToTitle(message = ''): void {
 
 function bindEvents(): void {
   getElement<HTMLButtonElement>('start-button').addEventListener('click', () => void startBattle());
+  practiceButton.addEventListener('click', () => void startPractice());
   getElement<HTMLButtonElement>('retry-button').addEventListener('click', () => {
     machine.transition('title');
     updateScreen();
@@ -1055,6 +1290,9 @@ function bindEvents(): void {
   resumeMatchButton.addEventListener('click', () => void resumeBattle());
   discardResumeButton.addEventListener('click', discardResume);
   replayVerifyButton.addEventListener('click', verifyPastedReplay);
+  practiceQuitButton.addEventListener('click', () => stopPractice());
+  practiceStartMatchButton.addEventListener('click', () => void startMatchFromPractice());
+  practiceTitleButton.addEventListener('click', () => stopPractice('練習を完了しました。'));
   difficultySelect.addEventListener('change', () => {
     updateDifficultyLabel();
     persistMatchSettings();
@@ -1106,6 +1344,7 @@ bindEvents();
 loadMatchSummary();
 loadMatchSettings();
 loadResumeSnapshot();
+loadTutorialCompletion();
 updateScreen();
 updateSoundButton();
 updateDifficultyLabel();
