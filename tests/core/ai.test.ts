@@ -6,7 +6,7 @@ import {
   isCpuAimAligned,
   normalizeCpuDifficulty,
 } from '../../src/core/difficulty.ts';
-import { cellCenterUnits, INVESTIGATE_RADIUS_UNITS } from '../../src/core/fixed.ts';
+import { BOMB_TRIGGER_TICKS, cellCenterUnits, INVESTIGATE_RADIUS_UNITS } from '../../src/core/fixed.ts';
 import { getMapDefinition } from '../../src/core/maps.ts';
 import type { TrapState, WorldState } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
@@ -111,6 +111,31 @@ describe('deterministic CPU cognition', () => {
     const decision = chooseCpuDecision(world);
     expect(decision.reason).toBe('disarming');
     expect(decision.command.investigate).toBe(true);
+    expect(decision.visibleTrapIds).toEqual([99]);
+  });
+
+  it('retreats from an active revealed trap instead of trying to disarm it', () => {
+    const base = createWorld(2037);
+    const trap = enemyTrap({
+      cellX: 7,
+      cellY: 6,
+      discoveredBy: [true, true],
+      triggerTicks: BOMB_TRIGGER_TICKS,
+    });
+    const world: WorldState = {
+      ...base,
+      tick: 1,
+      players: [
+        base.players[0],
+        { ...base.players[1], x: cellCenterUnits(7) - INVESTIGATE_RADIUS_UNITS / 2 },
+      ],
+      traps: [trap],
+      nextEntityId: 100,
+    };
+    const decision = chooseCpuDecision(world);
+    expect(decision.reason).toBe('retreating');
+    expect(decision.command.investigate).not.toBe(true);
+    expect(decision.command.moveX).toBe(-1);
     expect(decision.visibleTrapIds).toEqual([99]);
   });
 

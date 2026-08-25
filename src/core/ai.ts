@@ -67,6 +67,10 @@ function trapDistanceSquared(player: WorldState['players'][number], trap: TrapSt
   return distanceSquared(player.x, player.y, cellCenterUnits(trap.cellX), cellCenterUnits(trap.cellY));
 }
 
+function trapIsActive(trap: TrapState): boolean {
+  return (trap.triggerTicks ?? 0) > 0 || (trap.effectTicks ?? 0) > 0;
+}
+
 function command(overrides: Partial<InputCommand>): InputCommand {
   return normalizeCommand(overrides);
 }
@@ -83,7 +87,19 @@ function nearestVisibleEnemyTrap(
   radius: number,
 ): TrapState | null {
   return traps
-    .filter((trap) => trap.owner === 0 && trap.discoveredBy[1] && trap.armingTicks === 0)
+    .filter((trap) => trap.owner === 0 && trap.discoveredBy[1] && trap.armingTicks === 0 && !trapIsActive(trap))
+    .map((trap) => ({ trap, distance: trapDistanceSquared(player, trap) }))
+    .filter((candidate) => candidate.distance <= radius * radius)
+    .sort((first, second) => first.distance - second.distance || first.trap.id - second.trap.id)[0]?.trap ?? null;
+}
+
+function nearestVisibleActiveEnemyTrap(
+  player: WorldState['players'][number],
+  traps: readonly TrapState[],
+  radius: number,
+): TrapState | null {
+  return traps
+    .filter((trap) => trap.owner === 0 && trap.discoveredBy[1] && trap.armingTicks === 0 && trapIsActive(trap))
     .map((trap) => ({ trap, distance: trapDistanceSquared(player, trap) }))
     .filter((candidate) => candidate.distance <= radius * radius)
     .sort((first, second) => first.distance - second.distance || first.trap.id - second.trap.id)[0]?.trap ?? null;
@@ -276,6 +292,15 @@ export function chooseCpuDecision(world: WorldState, difficulty: CpuDifficulty =
     return {
       command: command({ investigate: true, investigateStart: true }),
       reason: 'investigating',
+      visibleTrapIds,
+    };
+  }
+
+  const activeRevealedEnemyTrap = nearestVisibleActiveEnemyTrap(cpu, visible, INVESTIGATE_RADIUS_UNITS * 2);
+  if (activeRevealedEnemyTrap) {
+    return {
+      command: command(movementAwayFromTrap(cpu, activeRevealedEnemyTrap)),
+      reason: 'retreating',
       visibleTrapIds,
     };
   }
