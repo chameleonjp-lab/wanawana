@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyPush, PLAYER_RADIUS_UNITS } from '../../src/core/fixed.ts';
+import { applyPush, cellCenterUnits, PLAYER_RADIUS_UNITS } from '../../src/core/fixed.ts';
 import { getMapDefinition } from '../../src/core/maps.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 import { CELL_UNITS, type WorldState } from '../../src/core/types.ts';
@@ -43,8 +43,8 @@ describe('map obstacle collisions', () => {
     let world: WorldState = {
       ...base,
       players: [
-        { ...base.players[0], x: 2 * CELL_UNITS, y: wallCenterY },
-        { ...base.players[1], x: 7 * CELL_UNITS, y: wallCenterY },
+        { ...base.players[0], x: cellCenterUnits(2), y: wallCenterY },
+        { ...base.players[1], x: cellCenterUnits(7), y: wallCenterY },
       ],
     };
 
@@ -53,7 +53,7 @@ describe('map obstacle collisions', () => {
 
     expect(world.shots).toHaveLength(0);
     expect(world.players[1].pushImmunityTicks).toBe(0);
-    expect(world.players[1].x).toBe(7 * CELL_UNITS);
+    expect(world.players[1].x).toBe(cellCenterUnits(7));
   });
 
   it('rejects trap placement on a wall cell', () => {

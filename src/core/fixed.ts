@@ -207,11 +207,13 @@ export function normalizeTrapLoadout(loadout: readonly TrapKind[] | undefined): 
 }
 
 export function snapToCell(value: number, maximumCells: number): number {
-  return clampInteger(Math.round(value / CELL_UNITS), 0, maximumCells - 1);
+  // Positions are represented in the centre of each cell. Convert to the
+  // nearest integer cell index before clamping to the arena.
+  return clampInteger(Math.round(value / CELL_UNITS - 0.5), 0, maximumCells - 1);
 }
 
 export function cellCenterUnits(cell: number): number {
-  return cell * CELL_UNITS;
+  return (cell + 0.5) * CELL_UNITS;
 }
 
 export function cellToPixels(value: number, pixelsPerCell: number): number {

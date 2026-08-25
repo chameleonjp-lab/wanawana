@@ -15,8 +15,8 @@ import {
 } from './types.ts';
 
 export const REPLAY_SCHEMA_VERSION = 1 as const;
-export const REPLAY_INPUT_ENCODING_VERSION = 1 as const;
-export const REPLAY_ENGINE_VERSION = 'wanawana-sim-v2' as const;
+export const REPLAY_INPUT_ENCODING_VERSION = 2 as const;
+export const REPLAY_ENGINE_VERSION = 'wanawana-sim-v3' as const;
 export const REPLAY_PRNG_NAME = 'fixed-integer-v1' as const;
 export const REPLAY_CHECKPOINT_INTERVAL_TICKS = 300;
 export const MAX_REPLAY_COMMANDS = 11_000;

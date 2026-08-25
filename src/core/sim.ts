@@ -76,8 +76,8 @@ function createPlayer(id: 0 | 1, mapId: MapId): PlayerState {
   const [spawnCellX, spawnCellY] = spawnCellFor(mapId, id);
   return {
     id,
-    x: spawnCellX * CELL_UNITS,
-    y: spawnCellY * CELL_UNITS,
+    x: cellCenterUnits(spawnCellX),
+    y: cellCenterUnits(spawnCellY),
     hp: 100,
     fireCooldownTicks: 0,
     fireSlowTicks: 0,
@@ -158,7 +158,7 @@ function placementCellIsValid(
 
 function spawnPosition(id: 0 | 1, mapId: MapId): { x: number; y: number } {
   const [cellX, cellY] = spawnCellFor(mapId, id);
-  return { x: cellX * CELL_UNITS, y: cellY * CELL_UNITS };
+  return { x: cellCenterUnits(cellX), y: cellCenterUnits(cellY) };
 }
 
 function stepPlayer(
