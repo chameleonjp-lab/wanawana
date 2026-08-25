@@ -715,8 +715,6 @@ describe('fixed simulation', () => {
       chainId: world.events[0].chainId,
       chainLength: 2,
       damage: 26,
-      x: cellCenterUnits(4),
-      y: cellCenterUnits(6),
     });
     expect(world.players[0].hp).toBe(100 - BOMB_DAMAGE - 26);
     expect(world.maxChain).toBe(2);
