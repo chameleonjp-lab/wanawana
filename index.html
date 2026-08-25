@@ -27,6 +27,11 @@
         </p>
         <p id="settings-note" class="settings-note">難度・舞台・罠ロードアウトは、この端末に保存されます。</p>
         <button id="reset-settings" class="text-button settings-reset" type="button">設定を初期値に戻す</button>
+        <div class="practice-entry" aria-labelledby="practice-entry-heading">
+          <h3 id="practice-entry-heading">初めてなら、まず操作を練習</h3>
+          <p id="practice-entry-note">60〜90秒の練習で、移動・射撃・罠の連鎖・調査解除を実際に試せます。</p>
+          <button id="practice-button" class="secondary-button" type="button">操作を練習する</button>
+        </div>
         <div class="difficulty-choice">
           <label for="difficulty-select">CPUの難しさ</label>
           <select id="difficulty-select">
@@ -123,6 +128,25 @@
           <span>歯車 <strong id="gear-value">3</strong>/5</span>
           <span>tick <strong id="tick-value">0</strong></span>
         </div>
+        <aside id="tutorial-card" class="tutorial-card is-hidden" aria-live="polite" aria-labelledby="tutorial-heading">
+          <div class="tutorial-card-heading">
+            <div>
+              <p class="eyebrow">操作練習</p>
+              <h3 id="tutorial-heading">1 / 4　動いて、誘導弾を当てる</h3>
+            </div>
+            <button id="practice-quit-button" class="text-button" type="button">練習をやめる</button>
+          </div>
+          <p id="tutorial-instruction">左の移動パッドで少し動き、右の射撃を短く押して離します。</p>
+          <p id="tutorial-hint" class="tutorial-hint is-hidden"></p>
+          <div class="tutorial-progress" aria-label="練習の進み具合">
+            <span id="tutorial-progress-bar"></span>
+          </div>
+          <div id="tutorial-complete-actions" class="tutorial-complete-actions is-hidden">
+            <p>4つの操作を試せました。本戦では、相手を罠へ誘い込んでみましょう。</p>
+            <button id="practice-start-match-button" class="primary-button" type="button">このままCPU戦へ</button>
+            <button id="practice-title-button" class="text-button" type="button">タイトルへ戻る</button>
+          </div>
+        </aside>
         <div id="arena" class="arena" aria-label="闘技場"></div>
         <div id="controls" class="controls" aria-label="操作台">
           <div class="control-column">

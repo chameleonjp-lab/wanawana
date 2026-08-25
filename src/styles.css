@@ -55,6 +55,10 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .difficulty-choice { display: grid; grid-template-columns: 1fr minmax(140px, 180px); gap: 8px 12px; align-items: center; margin-top: 18px; padding: 14px; border: 1px solid #5a4c78; border-radius: 14px; background: #211a37; }
 .settings-note { margin: 12px 0 0; color: #cfc3df; font-size: .74rem; line-height: 1.45; }
 .settings-reset { margin-top: 2px; min-height: 36px; font-size: .74rem; }
+.practice-entry { display: grid; gap: 4px; margin-top: 18px; padding: 14px; border: 1px solid #8cbdff; border-radius: 14px; background: #211f3b; }
+.practice-entry h3 { margin: 0; color: #f7f1e7; font-size: .95rem; }
+.practice-entry p { margin: 0; color: #cfc3df; font-size: .78rem; line-height: 1.5; }
+.practice-entry .secondary-button { margin-top: 8px; }
 .difficulty-choice label { color: #f7f1e7; font-weight: 700; }
 .difficulty-choice select { min-height: 44px; border: 1px solid #8f70ad; border-radius: 10px; padding: 0 10px; color: #251735; background: #f7f1e7; font: inherit; font-weight: 700; }
 .difficulty-help { grid-column: 1 / -1; margin: 0 !important; color: #cfc3df !important; font-size: .78rem; line-height: 1.45 !important; }
@@ -101,6 +105,21 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .hud { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 18px 0 12px; color: #f5e7c7; font-size: .82rem; }
 .hud span { padding: 6px 9px; border-radius: 999px; background: #2c2247; }
 .hud strong { color: #fff; }
+.tutorial-card { display: grid; gap: 8px; margin: 12px 0; padding: 14px; border: 1px solid #8cbdff; border-radius: 14px; background: #211f3b; }
+.tutorial-card.is-hidden { display: none; }
+.tutorial-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.tutorial-card-heading .eyebrow { margin-bottom: 4px; }
+.tutorial-card h3 { margin: 0; color: #f7f1e7; font-size: .96rem; }
+.tutorial-card p { margin: 0; color: #ddd4e8; font-size: .78rem; line-height: 1.5; }
+.tutorial-card .text-button { flex: 0 0 auto; margin: -5px -6px 0 0; padding: 4px 6px; min-height: 36px; font-size: .7rem; }
+.tutorial-hint { padding: 8px 10px; border-radius: 10px; color: #251735 !important; background: #ffd37a; font-size: .72rem !important; }
+.tutorial-hint.is-hidden { display: none; }
+.tutorial-progress { height: 6px; overflow: hidden; border-radius: 999px; background: #3c3155; }
+.tutorial-progress span { display: block; width: 25%; height: 100%; border-radius: inherit; background: #8cbdff; transition: width .2s ease; }
+.tutorial-complete-actions { display: grid; gap: 4px; }
+.tutorial-complete-actions.is-hidden { display: none; }
+.tutorial-complete-actions .primary-button { margin-top: 4px; }
+.tutorial-complete-actions .text-button { justify-self: center; margin: 0; }
 .arena { width: 100%; aspect-ratio: 9 / 13; min-height: 286px; overflow: hidden; border: 2px solid #8f70ad; border-radius: 18px; background: #0f0d1b; }
 .arena canvas { display: block; width: 100%; height: 100%; }
 .controls { display: grid; grid-template-columns: minmax(96px, 1fr) auto minmax(96px, 1fr); align-items: center; gap: 12px; margin-top: 14px; touch-action: none; user-select: none; -webkit-user-select: none; }
