@@ -554,7 +554,60 @@ describe('fixed simulation', () => {
     expect(world.players[0].hp).toBe(100 - BOMB_DAMAGE);
     expect(world.traps).toHaveLength(0);
     expect(world.events).toHaveLength(1);
-    expect(world.events[0]).toMatchObject({ kind: 'bomb', damage: BOMB_DAMAGE, chainLength: 1 });
+    expect(world.events[0]).toMatchObject({
+      kind: 'bomb',
+      damage: BOMB_DAMAGE,
+      chainLength: 1,
+      x: cellCenterUnits(3),
+      y: cellCenterUnits(6),
+    });
+  });
+
+  it('does not allow an active bomb or gas field to be investigated or disarmed', () => {
+    const base = createWorld(186);
+    const activeTraps: TrapState[] = [
+      {
+        id: 2,
+        owner: 1,
+        kind: 'bomb',
+        direction: 0,
+        cellX: 3,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [true, true],
+        triggerTicks: 12,
+      },
+      {
+        id: 3,
+        owner: 1,
+        kind: 'moya',
+        direction: 0,
+        cellX: 5,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 1_800,
+        discoveredBy: [true, true],
+        effectTicks: 12,
+      },
+    ];
+
+    for (const trap of activeTraps) {
+      let world: WorldState = {
+        ...base,
+        players: [{
+          ...base.players[0],
+          x: cellCenterUnits(trap.cellX),
+          y: cellCenterUnits(trap.cellY),
+        }, base.players[1]],
+        traps: [trap],
+        nextEntityId: 4,
+      };
+      world = advanceWorld(world, { investigate: true, investigateStart: true });
+      expect(world.players[0].investigation).toBeNull();
+      expect(world.traps).toHaveLength(1);
+      expect(world.traps[0].id).toBe(trap.id);
+    }
   });
 
   it('primes a nearby armed bomb and preserves the delayed chain context', () => {
@@ -662,6 +715,8 @@ describe('fixed simulation', () => {
       chainId: world.events[0].chainId,
       chainLength: 2,
       damage: 26,
+      x: cellCenterUnits(4),
+      y: cellCenterUnits(6),
     });
     expect(world.players[0].hp).toBe(100 - BOMB_DAMAGE - 26);
     expect(world.maxChain).toBe(2);

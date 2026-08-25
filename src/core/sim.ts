@@ -332,13 +332,17 @@ function trapDistanceSquared(player: PlayerState, trap: TrapState): number {
   return dx * dx + dy * dy;
 }
 
+function trapIsActive(trap: TrapState): boolean {
+  return (trap.triggerTicks ?? 0) > 0 || (trap.effectTicks ?? 0) > 0;
+}
+
 function findInvestigationTarget(
   player: PlayerState,
   traps: readonly TrapState[],
 ): { trap: TrapState; mode: 'reveal' | 'disarm' } | null {
   const candidates: Array<{ trap: TrapState; mode: 'reveal' | 'disarm'; distance: number }> = [];
   for (const trap of traps) {
-    if (trap.owner === player.id || trap.armingTicks > 0) continue;
+    if (trap.owner === player.id || trap.armingTicks > 0 || trapIsActive(trap)) continue;
     const distance = trapDistanceSquared(player, trap);
     if (!trap.discoveredBy[player.id] && distance <= INVESTIGATE_RADIUS_UNITS ** 2) {
       candidates.push({ trap, mode: 'reveal', distance });
@@ -358,7 +362,7 @@ function investigationStillValid(
 ): TrapState | null {
   if (player.x !== state.startX || player.y !== state.startY) return null;
   const trap = traps.find((candidate) => candidate.id === state.targetTrapId);
-  if (!trap || trap.owner === player.id || trap.armingTicks > 0) return null;
+  if (!trap || trap.owner === player.id || trap.armingTicks > 0 || trapIsActive(trap)) return null;
   if (state.mode === 'reveal' && trap.discoveredBy[player.id]) return null;
   if (state.mode === 'disarm' && !trap.discoveredBy[player.id]) return null;
   const radius = state.mode === 'reveal' ? INVESTIGATE_RADIUS_UNITS : DISARM_RADIUS_UNITS;
@@ -1019,8 +1023,8 @@ function resolveDelayedTrapEffects(
         kind: bomb.kind,
         target: targetId,
         responsibleActor,
-        x: currentPlayer.x,
-        y: currentPlayer.y,
+        x: centerX,
+        y: centerY,
         damage,
         pushX,
         pushY,
@@ -1102,8 +1106,8 @@ function resolveDelayedTrapEffects(
           kind: triggeredTrap.kind,
           target: targetId,
           responsibleActor,
-          x: currentPlayer.x,
-          y: currentPlayer.y,
+          x: cellCenterUnits(triggeredTrap.cellX),
+          y: cellCenterUnits(triggeredTrap.cellY),
           damage: effect.damage,
           pushX: effect.pushX,
           pushY: effect.pushY,
