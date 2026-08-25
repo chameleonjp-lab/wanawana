@@ -39,7 +39,7 @@ import { getMapDefinition, isMapId } from './maps.ts';
 import { normalizeTrapLoadout } from './fixed.ts';
 
 export const RESUME_SCHEMA_VERSION = 1 as const;
-export const RESUME_ENGINE_VERSION = 'wanawana-resume-v2' as const;
+export const RESUME_ENGINE_VERSION = 'wanawana-resume-v3' as const;
 export const RESUME_PRNG_NAME = 'fixed-integer-v1' as const;
 export const RESUME_MAX_AGE_MS = 30 * 60 * 1_000;
 export const RESUME_MAX_JSON_BYTES = 2_000_000;

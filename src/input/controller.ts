@@ -1,4 +1,4 @@
-import type { InputCommand, TrapKind } from '../core/types.ts';
+import type { InputCommand, TrapDirection, TrapKind } from '../core/types.ts';
 
 type PointerRole = 'move' | 'fire' | 'inspect' | 'trap';
 
@@ -28,6 +28,12 @@ const FIRE_KEY = ' ';
 const INSPECT_KEY = 'e';
 const DEAD_ZONE = 0.2;
 
+export function directionFromAxes(moveX: -1 | 0 | 1, moveY: -1 | 0 | 1): TrapDirection {
+  if (Math.abs(moveX) >= Math.abs(moveY) && moveX !== 0) return moveX > 0 ? 1 : 3;
+  if (moveY !== 0) return moveY > 0 ? 2 : 0;
+  return 0;
+}
+
 export function discreteAxis(value: number, deadZone = DEAD_ZONE): -1 | 0 | 1 {
   if (!Number.isFinite(value) || Math.abs(value) < deadZone) return 0;
   return value < 0 ? -1 : 1;
@@ -45,8 +51,10 @@ export class InputController {
   private trapKeyArmed: TrapKind | null = null;
   private trapPending: TrapKind | null = null;
   private trapPendingCell: TrapCell | null = null;
+  private trapPendingDirection: TrapDirection = 0;
   private trapPreview: TrapKind | null = null;
   private trapPreviewCell: TrapCell | null = null;
+  private trapPreviewDirection: TrapDirection = 0;
   private investigateHeld = false;
   private investigateStartPending = false;
   private active = false;
@@ -105,8 +113,10 @@ export class InputController {
     this.trapKeyArmed = null;
     this.trapPending = null;
     this.trapPendingCell = null;
+    this.trapPendingDirection = 0;
     this.trapPreview = null;
     this.trapPreviewCell = null;
+    this.trapPreviewDirection = 0;
     this.investigateHeld = false;
     this.investigateStartPending = false;
   }
@@ -119,6 +129,10 @@ export class InputController {
     return this.trapPreviewCell;
   }
 
+  public get previewDirection(): TrapDirection {
+    return this.trapPreviewDirection;
+  }
+
   /** Freeze the grid cell at the first fixed-tick observation of a held trap card. */
   public capturePreviewCell(cellX: number, cellY: number): void {
     if (!this.trapPreview || this.trapPreviewCell) return;
@@ -128,12 +142,16 @@ export class InputController {
   public readCommand(): InputCommand {
     const movePointer = [...this.pointers.values()].find((pointer) => pointer.role === 'move');
     const move = movePointer ? this.readPadAxes(movePointer) : this.readKeyboardAxes();
+    if (this.trapPreview) {
+      const direction = directionFromAxes(move.moveX, move.moveY);
+      if (move.moveX !== 0 || move.moveY !== 0) this.trapPreviewDirection = direction;
+    }
     const command: InputCommand = {
       moveX: move.moveX,
       moveY: move.moveY,
       fire: this.firePending,
       placeTrap: this.trapPending ?? undefined,
-      trapDirection: 0,
+      trapDirection: this.trapPendingDirection,
       trapCellX: this.trapPendingCell?.cellX,
       trapCellY: this.trapPendingCell?.cellY,
       investigate: this.investigateHeld,
@@ -142,6 +160,7 @@ export class InputController {
     this.firePending = false;
     this.trapPending = null;
     this.trapPendingCell = null;
+    this.trapPendingDirection = 0;
     this.investigateStartPending = false;
     return command;
   }
@@ -208,6 +227,7 @@ export class InputController {
     if (role.role === 'trap' && role.trapKind) {
       this.trapPreview = role.trapKind;
       this.trapPreviewCell = null;
+      this.trapPreviewDirection = 0;
     }
     try {
       target.setPointerCapture(event.pointerId);
@@ -236,8 +256,10 @@ export class InputController {
     if (pointer.role === 'trap') {
       this.trapPending = insideRoot ? pointer.trapKind ?? null : null;
       this.trapPendingCell = insideRoot ? this.trapPreviewCell : null;
+      this.trapPendingDirection = insideRoot ? this.trapPreviewDirection : 0;
       this.trapPreview = null;
       this.trapPreviewCell = null;
+      this.trapPreviewDirection = 0;
     }
     this.releasePointer(event.pointerId, pointer);
     event.preventDefault();
@@ -286,6 +308,7 @@ export class InputController {
         this.trapKeyArmed = trapKind;
         this.trapPreview = trapKind;
         this.trapPreviewCell = null;
+        this.trapPreviewDirection = 0;
       }
       return;
     }
@@ -311,10 +334,12 @@ export class InputController {
       if (this.trapKeyArmed === trapKind) {
         this.trapPending = trapKind;
         this.trapPendingCell = this.trapPreviewCell;
+        this.trapPendingDirection = this.trapPreviewDirection;
       }
       this.trapKeyArmed = null;
       this.trapPreview = null;
       this.trapPreviewCell = null;
+      this.trapPreviewDirection = 0;
       return;
     }
     this.pressedKeys.delete(key);

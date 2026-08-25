@@ -11,6 +11,7 @@ import {
   BOMB_CHAIN_RADIUS_UNITS,
   BOMB_DAMAGE,
   BOMB_TRIGGER_TICKS,
+  cellCenterUnits,
   DISARM_TICKS,
   FIRE_COOLDOWN_TICKS,
   HATCH_RADIUS_UNITS,
@@ -257,7 +258,9 @@ describe('fixed simulation', () => {
     };
     let world: WorldState = {
       ...base,
-      players: [{ ...base.players[0], x: 21_600 }, base.players[1]],
+      // Stay just outside the bounce contact radius while remaining inside the
+      // reveal/disarm radius; otherwise the first tick would trigger the trap.
+      players: [{ ...base.players[0], x: cellCenterUnits(3) - 6_000 }, base.players[1]],
       traps: [enemyTrap],
       nextEntityId: 3,
     };
@@ -312,7 +315,7 @@ describe('fixed simulation', () => {
     };
     const world: WorldState = {
       ...base,
-      players: [{ ...base.players[0], x: 28_288 }, base.players[1]],
+      players: [{ ...base.players[0], x: cellCenterUnits(3) - 512 }, base.players[1]],
       traps: [trap],
       nextEntityId: 3,
     };
@@ -327,7 +330,7 @@ describe('fixed simulation', () => {
       chainLength: 1,
       damage: 0,
     });
-    expect(next.players[0].x).toBeGreaterThan(28_288);
+    expect(next.players[0].x).toBeGreaterThan(cellCenterUnits(3) - 512);
   });
 
   it('orders a trap already under the player before a trap reached on the first step', () => {
@@ -358,7 +361,9 @@ describe('fixed simulation', () => {
     ];
     const world: WorldState = {
       ...base,
-      players: [{ ...base.players[0], x: 23_999, y: 57_600 }, base.players[1]],
+      players: [{ ...base.players[0], x: cellCenterUnits(3) - 5_100, y: cellCenterUnits(6) }, {
+        ...base.players[1], x: cellCenterUnits(7) - 5_000, y: cellCenterUnits(6),
+      }],
       traps,
       nextEntityId: 11,
     };
@@ -397,8 +402,8 @@ describe('fixed simulation', () => {
     const shot = {
       id: 5,
       owner: 0 as const,
-      x: 60_400,
-      y: 57_600,
+      x: cellCenterUnits(7) - 6_800,
+      y: cellCenterUnits(6),
       vx: 1_600,
       vy: 0,
       travelledUnits: 0,
@@ -406,8 +411,8 @@ describe('fixed simulation', () => {
     const world: WorldState = {
       ...base,
       players: [
-        { ...base.players[0], x: 23_500, y: 57_600 },
-        { ...base.players[1], x: 62_000, y: 57_600 },
+        { ...base.players[0], x: cellCenterUnits(3) - 5_300, y: cellCenterUnits(6) },
+        { ...base.players[1], x: cellCenterUnits(7) - 5_200, y: cellCenterUnits(6) },
       ],
       shots: [shot],
       traps,
@@ -432,17 +437,17 @@ describe('fixed simulation', () => {
       remainingTicks: 1_800,
       discoveredBy: [false, true],
     };
-    const startX = 28_800 - HATCH_RADIUS_UNITS - 1;
+    const startX = cellCenterUnits(3) - HATCH_RADIUS_UNITS - 1;
     const world: WorldState = {
       ...base,
-      players: [{ ...base.players[0], x: startX, y: 57_600 }, base.players[1]],
+      players: [{ ...base.players[0], x: startX, y: cellCenterUnits(6) }, base.players[1]],
       traps: [trap],
       nextEntityId: 3,
     };
 
     const next = advanceWorld(world, { moveX: 1 });
 
-    expect(next.events[0]).toMatchObject({ trapId: 2, x: startX + 1, y: 57_600 });
+    expect(next.events[0]).toMatchObject({ trapId: 2, x: startX + 1, y: cellCenterUnits(6) });
     expect(next.players[0].x).toBe(startX + 1);
     expect(next.players[0].x).toBeLessThan(startX + 512);
   });
@@ -503,7 +508,7 @@ describe('fixed simulation', () => {
     };
     let world: WorldState = {
       ...base,
-      players: [{ ...base.players[0], x: 28_800 }, base.players[1]],
+      players: [{ ...base.players[0], x: cellCenterUnits(3) - 1_000 }, base.players[1]],
       traps: [trap],
       nextEntityId: 3,
     };
@@ -514,7 +519,7 @@ describe('fixed simulation', () => {
       world = advanceWorld(world, { moveX: 1, fire: true });
     }
     expect(world.players[0].disabledTicks).toBe(0);
-    expect(world.players[0].x).toBe(2 * 9_600);
+    expect(world.players[0].x).toBe(cellCenterUnits(2));
     expect(world.players[0].respawnInvulnerableTicks).toBeGreaterThan(0);
     expect(world.shotsFired[0]).toBe(0);
   });
@@ -636,7 +641,7 @@ describe('fixed simulation', () => {
     let world: WorldState = {
       ...base,
       players: [
-        { ...base.players[0], x: 3.5 * 9_600, y: 6 * 9_600 },
+        { ...base.players[0], x: cellCenterUnits(3) + 256, y: cellCenterUnits(6) },
         base.players[1],
       ],
       traps: [bomb, hatch],
@@ -702,7 +707,7 @@ describe('fixed simulation', () => {
     let world: WorldState = {
       ...base,
       players: [
-        { ...base.players[0], x: 3.1 * 9_600, y: 6 * 9_600 },
+        { ...base.players[0], x: cellCenterUnits(3) + 256, y: cellCenterUnits(6) },
         base.players[1],
       ],
       traps,

@@ -619,12 +619,20 @@ function drawWorld(): void {
   const previewCellX = player.placement?.cellX ?? inputController.previewCell?.cellX ?? snapToCell(player.x, ARENA_WIDTH_CELLS);
   const previewCellY = player.placement?.cellY ?? inputController.previewCell?.cellY ?? snapToCell(player.y, ARENA_HEIGHT_CELLS);
   if (inputController.previewTrap || player.placement) {
+    const previewDirection = player.placement?.direction ?? inputController.previewDirection;
     const preview = new Graphics();
     const previewX = offsetX + cellToPixels(cellCenterUnits(previewCellX), pixelsPerCell);
     const previewY = offsetY + cellToPixels(cellCenterUnits(previewCellY), pixelsPerCell);
     preview.roundRect(previewX - pixelsPerCell * 0.38, previewY - pixelsPerCell * 0.38, pixelsPerCell * 0.76, pixelsPerCell * 0.76, pixelsPerCell * 0.14)
       .stroke({ color: 0xf2b8ff, alpha: 0.9, width: 2 });
     stage.addChild(preview);
+    const directionVectors = [[0, -1], [1, 0], [0, 1], [-1, 0]] as const;
+    const [directionX, directionY] = directionVectors[previewDirection];
+    const arrow = new Graphics();
+    arrow.moveTo(previewX, previewY)
+      .lineTo(previewX + directionX * pixelsPerCell * 0.34, previewY + directionY * pixelsPerCell * 0.34)
+      .stroke({ color: 0xffffff, alpha: 0.95, width: 3 });
+    stage.addChild(arrow);
   }
 
   for (const event of world.events) {
@@ -695,9 +703,9 @@ function updateHud(): void {
   inspectButton.classList.toggle('is-unavailable', !dangerCue);
   inspectButton.setAttribute('aria-disabled', String(!dangerCue));
   if (inputController.previewTrap) {
-    trapPreview.textContent = `${trapName(inputController.previewTrap)}を足元へ予告中。離して設置`;
+    trapPreview.textContent = `${trapName(inputController.previewTrap)}を${trapDirectionName(inputController.previewDirection)}へ予告中。離して設置`;
   } else if (world.players[0].placement) {
-    trapPreview.textContent = `${trapName(world.players[0].placement.kind)}を設置中…`;
+    trapPreview.textContent = `${trapName(world.players[0].placement.kind)}を${trapDirectionName(world.players[0].placement.direction)}へ設置中…`;
   } else if (world.players[0].investigation) {
     trapPreview.textContent = world.players[0].investigation.mode === 'reveal' ? '調査中…' : '解除中…';
   } else if (dangerCue) {
@@ -739,6 +747,13 @@ function trapName(kind: TrapKind): string {
   if (kind === 'hatch') return 'パカット床';
   if (kind === 'bomb') return 'ポン玉';
   return 'モヤびん';
+}
+
+function trapDirectionName(direction: 0 | 1 | 2 | 3): string {
+  if (direction === 1) return '右';
+  if (direction === 2) return '下';
+  if (direction === 3) return '左';
+  return '上';
 }
 
 function startLoop(): void {

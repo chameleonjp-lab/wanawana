@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getMapDefinition, spawnCellFor } from '../../src/core/maps.ts';
+import { cellCenterUnits, snapToCell } from '../../src/core/fixed.ts';
 import { createWorld } from '../../src/core/sim.ts';
 import {
   ARENA_HEIGHT_CELLS,
@@ -45,8 +46,10 @@ describe('deterministic maps', () => {
     const world = createWorld(123, undefined, undefined, 'unknown-map');
     expect(world.mapId).toBe(DEFAULT_MAP_ID);
     expect(world.seed).toBe(123);
-    expect(world.players[0].x).toBe(2 * 9_600);
-    expect(world.players[1].x).toBe(7 * 9_600);
+    expect(world.players[0].x).toBe(cellCenterUnits(2));
+    expect(world.players[0].y).toBe(cellCenterUnits(6));
+    expect(world.players[1].x).toBe(cellCenterUnits(7));
+    expect(world.players[1].y).toBe(cellCenterUnits(6));
   });
 
   it('includes the selected map in the deterministic world hash', () => {
@@ -57,5 +60,11 @@ describe('deterministic maps', () => {
     expect(gearworks.lastHash).not.toBe(crossroads.lastHash);
     expect(crossroads.lastHash).toBe(repeated.lastHash);
     expect(crossroads.players[0]).not.toEqual(gearworks.players[0]);
+  });
+
+  it('snaps centre-based positions back to their owning cells', () => {
+    expect(snapToCell(cellCenterUnits(0), ARENA_WIDTH_CELLS)).toBe(0);
+    expect(snapToCell(cellCenterUnits(4), ARENA_WIDTH_CELLS)).toBe(4);
+    expect(snapToCell(cellCenterUnits(8), ARENA_WIDTH_CELLS)).toBe(8);
   });
 });

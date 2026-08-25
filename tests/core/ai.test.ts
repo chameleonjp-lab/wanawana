@@ -6,8 +6,8 @@ import {
   isCpuAimAligned,
   normalizeCpuDifficulty,
 } from '../../src/core/difficulty.ts';
-import { INVESTIGATE_RADIUS_UNITS } from '../../src/core/fixed.ts';
-import { CELL_UNITS, type TrapState, type WorldState } from '../../src/core/types.ts';
+import { cellCenterUnits, INVESTIGATE_RADIUS_UNITS } from '../../src/core/fixed.ts';
+import type { TrapState, WorldState } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 
 function enemyTrap(overrides: Partial<TrapState> = {}): TrapState {
@@ -62,7 +62,7 @@ describe('deterministic CPU cognition', () => {
     const trap = enemyTrap({ cellX: 7, cellY: 6 });
     const world: WorldState = {
       ...base,
-      players: [base.players[0], { ...base.players[1], x: 7 * CELL_UNITS - INVESTIGATE_RADIUS_UNITS / 2 }],
+      players: [base.players[0], { ...base.players[1], x: cellCenterUnits(7) - INVESTIGATE_RADIUS_UNITS / 2 }],
       traps: [trap],
       nextEntityId: 100,
     };
@@ -81,7 +81,7 @@ describe('deterministic CPU cognition', () => {
       tick: 13,
       players: [base.players[0], {
         ...base.players[1],
-        x: 7 * CELL_UNITS - INVESTIGATE_RADIUS_UNITS / 2,
+        x: cellCenterUnits(7) - INVESTIGATE_RADIUS_UNITS / 2,
         placement: {
           kind: 'bounce',
           direction: 0,
@@ -143,7 +143,7 @@ describe('deterministic CPU cognition', () => {
     const world: WorldState = {
       ...base,
       tick: 13,
-      players: [base.players[0], { ...base.players[1], x: 7 * CELL_UNITS - INVESTIGATE_RADIUS_UNITS / 2 }],
+      players: [base.players[0], { ...base.players[1], x: cellCenterUnits(7) - INVESTIGATE_RADIUS_UNITS / 2 }],
       traps: [trap],
       nextEntityId: 100,
     };

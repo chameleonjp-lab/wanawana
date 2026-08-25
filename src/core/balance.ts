@@ -26,7 +26,7 @@ function serializeNamespace(namespace: object): string {
  * instead of silently applying new rules to old commands.
  */
 export const BALANCE_CONFIG_HASH = hashText([
-  'wanawana-balance-v2',
+  'wanawana-balance-v3',
   serializeNamespace(types),
   serializeNamespace(fixed),
 ].join('|'));
