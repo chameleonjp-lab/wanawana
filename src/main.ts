@@ -62,6 +62,7 @@ import { advanceWorld, createWorld } from './core/sim.ts';
 import {
   ARENA_HEIGHT_CELLS,
   ARENA_WIDTH_CELLS,
+  CELL_UNITS,
   DEFAULT_TRAP_LOADOUT,
   DEFAULT_MAP_ID,
   type MapId,
@@ -82,6 +83,7 @@ const CONTEXT_RECOVERY_TIMEOUT_MS = 5_000;
 const RESUME_STORAGE_KEY = 'wanawana:v1:resume';
 const TUTORIAL_STORAGE_KEY = 'wanawana:v1:tutorial';
 const RESUME_SAVE_INTERVAL_TICKS = 2 * TICK_RATE;
+const BLUEPRINT_TRAIL_TICKS = 5 * TICK_RATE;
 
 const machine = new AppStateMachine();
 const status = getElement<HTMLParagraphElement>('status');
@@ -98,6 +100,8 @@ const gearValue = getElement<HTMLElement>('gear-value');
 const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
 const resultDetails = getElement<HTMLElement>('result-details');
+const blueprintNote = getElement<HTMLElement>('blueprint-note');
+const resultBlueprint = getElement<HTMLElement>('result-blueprint');
 const resultHistory = getElement<HTMLElement>('result-history');
 const resultHash = getElement<HTMLElement>('result-hash');
 const copyRecordButton = getElement<HTMLButtonElement>('copy-record-button');
@@ -162,6 +166,23 @@ let resumeStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
 let replayRecorder: ReplayRecorder | null = null;
 let completedReplay: MatchReplay | null = null;
+interface MovementSample {
+  readonly tick: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface TrapPlacementSample {
+  readonly id: number;
+  readonly owner: 0 | 1;
+  readonly kind: TrapKind;
+  readonly direction: 0 | 1 | 2 | 3;
+  readonly cellX: number;
+  readonly cellY: number;
+}
+
+let movementTrail: MovementSample[] = [];
+let trapPlacementSamples: TrapPlacementSample[] = [];
 let practiceMode = false;
 let practiceComplete = false;
 let tutorialState: TutorialState = createTutorialState();
@@ -916,6 +937,174 @@ function trapDirectionName(direction: 0 | 1 | 2 | 3): string {
   return '上';
 }
 
+function resetBlueprintTelemetry(initialWorld: WorldState | null): void {
+  movementTrail = initialWorld
+    ? [{ tick: initialWorld.tick, x: initialWorld.players[0].x, y: initialWorld.players[0].y }]
+    : [];
+  trapPlacementSamples = [];
+  if (initialWorld) recordBlueprintTelemetry(initialWorld, initialWorld);
+}
+
+function recordBlueprintTelemetry(previousWorld: WorldState, currentWorld: WorldState): void {
+  if (practiceMode) return;
+  const lastSample = movementTrail[movementTrail.length - 1];
+  if (!lastSample || lastSample.tick !== currentWorld.tick) {
+    movementTrail.push({
+      tick: currentWorld.tick,
+      x: currentWorld.players[0].x,
+      y: currentWorld.players[0].y,
+    });
+  }
+  const oldestTick = Math.max(0, currentWorld.tick - BLUEPRINT_TRAIL_TICKS);
+  movementTrail = movementTrail.filter((sample) => sample.tick >= oldestTick);
+
+  const knownIds = new Set(trapPlacementSamples.map((sample) => sample.id));
+  for (const trap of currentWorld.traps) {
+    if (knownIds.has(trap.id)) continue;
+    trapPlacementSamples.push({
+      id: trap.id,
+      owner: trap.owner,
+      kind: trap.kind,
+      direction: trap.direction,
+      cellX: trap.cellX,
+      cellY: trap.cellY,
+    });
+    knownIds.add(trap.id);
+  }
+  // A trap can be consumed on the same tick as its first visible state in a
+  // resumed or very busy match. Keep a minimal event-based marker in that
+  // case so the result still explains where the effect happened.
+  for (const event of currentWorld.events) {
+    if (knownIds.has(event.trapId)) continue;
+    trapPlacementSamples.push({
+      id: event.trapId,
+      owner: event.owner,
+      kind: event.kind,
+      direction: 0,
+      cellX: snapToCell(event.x, ARENA_WIDTH_CELLS),
+      cellY: snapToCell(event.y, ARENA_HEIGHT_CELLS),
+    });
+    knownIds.add(event.trapId);
+  }
+  // Keep the argument meaningful for callers that pass the same world at the
+  // start of a match and document that no previous state is persisted.
+  void previousWorld;
+}
+
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+function createSvgElement<K extends keyof SVGElementTagNameMap>(
+  name: K,
+  attributes: Readonly<Record<string, string>>,
+): SVGElementTagNameMap[K] {
+  const element = document.createElementNS(SVG_NAMESPACE, name);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+  return element;
+}
+
+function toHexColor(color: number): string {
+  return `#${color.toString(16).padStart(6, '0')}`;
+}
+
+function renderBlueprint(): void {
+  if (!world) return;
+  const map = getMapDefinition(world.mapId);
+  const svg = createSvgElement('svg', {
+    viewBox: `0 0 ${ARENA_WIDTH_CELLS} ${ARENA_HEIGHT_CELLS}`,
+    role: 'img',
+    'aria-labelledby': 'blueprint-svg-title blueprint-svg-description',
+  });
+  svg.append(createSvgElement('title', { id: 'blueprint-svg-title' }));
+  svg.querySelector('#blueprint-svg-title')!.textContent = 'ワナワナの試合設計図';
+  svg.append(createSvgElement('desc', { id: 'blueprint-svg-description' }));
+  svg.querySelector('#blueprint-svg-description')!.textContent = '黄色の線があなたの最後の移動、丸印が罠、数字が発動順です。';
+  svg.append(createSvgElement('rect', {
+    x: '0', y: '0', width: String(ARENA_WIDTH_CELLS), height: String(ARENA_HEIGHT_CELLS),
+    fill: toHexColor(map.backgroundColor),
+  }));
+  const grid = createSvgElement('g', { stroke: toHexColor(map.gridColor), 'stroke-width': '0.025', opacity: '0.9' });
+  for (let column = 0; column <= ARENA_WIDTH_CELLS; column += 1) {
+    grid.append(createSvgElement('line', { x1: String(column), y1: '0', x2: String(column), y2: String(ARENA_HEIGHT_CELLS) }));
+  }
+  for (let row = 0; row <= ARENA_HEIGHT_CELLS; row += 1) {
+    grid.append(createSvgElement('line', { x1: '0', y1: String(row), x2: String(ARENA_WIDTH_CELLS), y2: String(row) }));
+  }
+  svg.append(grid);
+  const obstacles = createSvgElement('g', { fill: toHexColor(map.accentColor), opacity: '0.34' });
+  for (const obstacle of map.obstacleCells) {
+    obstacles.append(createSvgElement('rect', {
+      x: String(obstacle.cellX + 0.08), y: String(obstacle.cellY + 0.08), width: '0.84', height: '0.84', rx: '0.08',
+    }));
+  }
+  svg.append(obstacles);
+
+  const trail = movementTrail.slice(-BLUEPRINT_TRAIL_TICKS);
+  if (trail.length >= 2) {
+    svg.append(createSvgElement('polyline', {
+      points: trail.map((sample) => `${sample.x / CELL_UNITS},${sample.y / CELL_UNITS}`).join(' '),
+      fill: 'none', stroke: '#ffd37a', 'stroke-width': '0.09', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: '0.88',
+    }));
+  }
+
+  const placementGroup = createSvgElement('g', {});
+  for (const placement of trapPlacementSamples) {
+    const marker = createSvgElement('circle', {
+      cx: String(placement.cellX + 0.5), cy: String(placement.cellY + 0.5), r: '0.22',
+      fill: toHexColor(trapColor(placement.kind)),
+      stroke: placement.owner === 0 ? '#ffd37a' : '#d59aff', 'stroke-width': '0.09',
+    });
+    const title = createSvgElement('title', {});
+    title.textContent = `${placement.owner === 0 ? 'あなた' : 'CPU'}の${trapName(placement.kind)}（${trapDirectionName(placement.direction)}）`;
+    marker.append(title);
+    placementGroup.append(marker);
+  }
+  svg.append(placementGroup);
+
+  const events = world.events.slice(-36);
+  const eventById = new Map(events.map((event) => [event.id, event]));
+  const causalLines = createSvgElement('g', { stroke: '#f2b8ff', 'stroke-width': '0.06', opacity: '0.78' });
+  for (const event of events) {
+    if (event.parentEventId === null) continue;
+    const parent = eventById.get(event.parentEventId);
+    if (!parent) continue;
+    causalLines.append(createSvgElement('line', {
+      x1: String(parent.x / CELL_UNITS), y1: String(parent.y / CELL_UNITS),
+      x2: String(event.x / CELL_UNITS), y2: String(event.y / CELL_UNITS),
+    }));
+  }
+  svg.append(causalLines);
+  const eventGroup = createSvgElement('g', {});
+  for (const event of events) {
+    const marker = createSvgElement('circle', {
+      cx: String(event.x / CELL_UNITS), cy: String(event.y / CELL_UNITS), r: '0.16',
+      fill: toHexColor(trapColor(event.kind)), stroke: '#ffffff', 'stroke-width': '0.05',
+    });
+    const title = createSvgElement('title', {});
+    title.textContent = `発動${event.id}・${trapName(event.kind)}・${event.chainLength}段・${event.target === 0 ? 'あなた' : 'CPU'}`;
+    marker.append(title);
+    eventGroup.append(marker);
+    const label = createSvgElement('text', {
+      x: String(event.x / CELL_UNITS + 0.2), y: String(event.y / CELL_UNITS - 0.18),
+      fill: '#ffffff', 'font-size': '0.32', 'font-family': 'sans-serif', 'font-weight': '700',
+    });
+    label.textContent = String(event.id);
+    eventGroup.append(label);
+  }
+  svg.append(eventGroup);
+  const start = movementTrail[0];
+  const end = movementTrail[movementTrail.length - 1];
+  if (start) svg.append(createSvgElement('circle', { cx: String(start.x / CELL_UNITS), cy: String(start.y / CELL_UNITS), r: '0.11', fill: '#ffffff' }));
+  if (end) svg.append(createSvgElement('circle', { cx: String(end.x / CELL_UNITS), cy: String(end.y / CELL_UNITS), r: '0.12', fill: '#ffd37a', stroke: '#ffffff', 'stroke-width': '0.04' }));
+
+  const legend = document.createElement('p');
+  legend.className = 'blueprint-legend';
+  legend.textContent = `黄色線: 最後${Math.min(5, world.tick / TICK_RATE).toFixed(1)}秒の移動　白数字: 発動順　紫線: 連鎖の因果`;
+  resultBlueprint.replaceChildren(svg, legend);
+  blueprintNote.textContent = world.events.length > events.length
+    ? `全${trapPlacementSamples.length}個の罠と、直近${events.length}件の発動を表示しています。連鎖の詳細は下の一覧で確認できます。`
+    : `全${trapPlacementSamples.length}個の罠と発動順を表示しています。黄色線は最後の5秒の移動です。`;
+}
+
 function startLoop(): void {
   cancelAnimationFrame(frameId);
   lastFrameTime = 0;
@@ -941,6 +1130,7 @@ function loop(timestamp: number): void {
     const cpuDecision = practiceMode ? { command: {} as InputCommand } : chooseCpuDecision(world, cpuDifficulty);
     const previousWorld = world;
     world = advanceWorld(world, playerInput, cpuDecision.command);
+    recordBlueprintTelemetry(previousWorld, world);
     if (practiceMode) {
       const tutorialUpdate = advanceTutorial(tutorialState, previousWorld, world);
       tutorialState = tutorialUpdate.state;
@@ -1089,6 +1279,7 @@ function finishBattle(): void {
   recordFinishedMatch(report);
   resultSummary.textContent = `${report.resultLabel}。${world.tick}tickで試合を終えました。`;
   renderResultDetails();
+  renderBlueprint();
   resultHash.textContent = world.lastHash;
   copyRecordButton.disabled = completedReplay === null;
   replayCopyStatus.textContent = completedReplay
@@ -1148,6 +1339,7 @@ async function resumeBattle(): Promise<void> {
   inputController.setTrapLoadout(selectedLoadout);
   contextRecovery.startMatch();
   world = snapshot.world;
+  resetBlueprintTelemetry(world);
   summaryRecordedWorld = null;
   replayRecorder = null;
   completedReplay = null;
@@ -1202,6 +1394,7 @@ function stopPractice(message = '練習を終了しました。'): void {
   practiceComplete = false;
   tutorialState = createTutorialState();
   world = null;
+  resetBlueprintTelemetry(null);
   replayRecorder = null;
   completedReplay = null;
   if (machine.state === 'battle' || machine.state === 'paused') machine.transition('title');
@@ -1234,6 +1427,7 @@ async function startBattle(): Promise<void> {
   clearResumeSnapshot();
   contextRecovery.startMatch();
   world = createWorld(Date.now() >>> 0, selectedLoadout, selectedLoadout, selectedMap);
+  resetBlueprintTelemetry(world);
   summaryRecordedWorld = null;
   completedReplay = null;
   replayRecorder = new ReplayRecorder(world, { buildCommit: BUILD_COMMIT });
@@ -1257,6 +1451,7 @@ function returnToTitle(message = ''): void {
   inputController.setTrapLoadout(null);
   soundEngine.suspend();
   world = null;
+  resetBlueprintTelemetry(null);
   replayRecorder = null;
   completedReplay = null;
   practiceMode = false;

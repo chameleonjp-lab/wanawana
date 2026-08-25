@@ -147,6 +147,12 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .overlay-screen { text-align: center; }
 .result-details { display: grid; gap: 12px; margin-top: 18px; text-align: left; }
 .result-reason { margin: 0; padding: 12px 14px; border: 1px solid #5a4c78; border-radius: 14px; color: #f7f1e7; background: #211a37; }
+.blueprint-section { display: grid; gap: 6px; margin-top: 18px; text-align: left; }
+.blueprint-section h3 { margin: 0; color: #f7f1e7; font-size: .98rem; }
+.blueprint-note { margin: 0; color: #cfc3df !important; font-size: .74rem; line-height: 1.5 !important; }
+.result-blueprint { width: min(100%, 330px); margin: 4px auto 0; overflow: hidden; border: 1px solid #8f70ad; border-radius: 14px; background: #0f0d1b; }
+.result-blueprint svg { display: block; width: 100%; height: auto; aspect-ratio: 9 / 13; }
+.blueprint-legend { margin: 0; padding: 8px 10px; color: #cfc3df !important; background: #211a37; font-size: .68rem; line-height: 1.45 !important; }
 .result-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .result-stat { margin: 0; padding: 10px 12px; border-radius: 12px; color: #ddd4e8; background: #2b2246; font-size: .78rem; }
 .result-stat strong { display: block; margin-top: 3px; color: #ffd37a; font-size: 1.05rem; }
