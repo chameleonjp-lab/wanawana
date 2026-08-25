@@ -2,6 +2,7 @@ import { Application, Graphics } from 'pixi.js';
 import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
+import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
 import { OfflineUpdateManager } from './app/offline.ts';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
@@ -153,6 +154,7 @@ let pixiApp: Application | null = null;
 let world: WorldState | null = null;
 let frameId = 0;
 let resizeFrameId: number | null = null;
+let viewportBaseline: ViewportSize | null = null;
 let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
@@ -520,6 +522,19 @@ function clearContextRecoveryTimer(): void {
   contextRecoveryTimer = null;
 }
 
+function readViewportSize(): ViewportSize {
+  const rect = arena.getBoundingClientRect();
+  return createViewportSize(rect.width, rect.height);
+}
+
+function captureViewportBaseline(): void {
+  viewportBaseline = readViewportSize();
+}
+
+function clearViewportBaseline(): void {
+  viewportBaseline = null;
+}
+
 function scheduleViewportRedraw(): void {
   if (resizeFrameId !== null) window.cancelAnimationFrame(resizeFrameId);
   resizeFrameId = window.requestAnimationFrame(() => {
@@ -527,12 +542,14 @@ function scheduleViewportRedraw(): void {
     if (!world || !pixiApp || machine.state === 'title' || machine.state === 'unsupported') return;
     updateHud();
     drawWorld();
+    captureViewportBaseline();
   });
 }
 
 function handleViewportResize(message = '画面サイズが変わったため停止しました。表示が落ち着いてから再開してください。'): void {
+  const changed = viewportSizeChanged(viewportBaseline, readViewportSize());
   inputController.reset();
-  if (machine.state === 'battle') pauseGame(message);
+  if (machine.state === 'battle' && changed) pauseGame(message);
   scheduleViewportRedraw();
 }
 
@@ -1189,6 +1206,9 @@ async function resumeGame(): Promise<void> {
   inputController.activate();
   machine.transition('battle');
   updateScreen();
+  updateHud();
+  drawWorld();
+  captureViewportBaseline();
   if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
@@ -1350,6 +1370,7 @@ async function resumeBattle(): Promise<void> {
   updateScreen();
   updateHud();
   drawWorld();
+  captureViewportBaseline();
   if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
@@ -1380,6 +1401,7 @@ async function startPractice(): Promise<void> {
   updateScreen();
   updateHud();
   drawWorld();
+  captureViewportBaseline();
   if (!soundReady) status.textContent = '音なしで練習を続けます。';
   startLoop();
 }
@@ -1438,6 +1460,7 @@ async function startBattle(): Promise<void> {
   updateScreen();
   updateHud();
   drawWorld();
+  captureViewportBaseline();
   if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
@@ -1446,6 +1469,7 @@ function returnToTitle(message = ''): void {
   cancelAnimationFrame(frameId);
   clearContextRecoveryTimer();
   contextRecovery.endMatch();
+  clearViewportBaseline();
   clearResumeSnapshot();
   inputController.deactivate();
   inputController.setTrapLoadout(null);
