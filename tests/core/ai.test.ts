@@ -7,6 +7,7 @@ import {
   normalizeCpuDifficulty,
 } from '../../src/core/difficulty.ts';
 import { cellCenterUnits, INVESTIGATE_RADIUS_UNITS } from '../../src/core/fixed.ts';
+import { getMapDefinition } from '../../src/core/maps.ts';
 import type { TrapState, WorldState } from '../../src/core/types.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 
@@ -125,6 +126,52 @@ describe('deterministic CPU cognition', () => {
     const next = advanceWorld(world, {}, decision.command);
     expect(next.players[1].placement?.kind).toBe('bounce');
     expect(next.traps).toHaveLength(0);
+  });
+
+  it('expands placement around wall clusters without selecting a wall cell', () => {
+    const base = createWorld(2035, ['bounce', 'shock', 'hatch'], ['bounce', 'shock', 'hatch'], 'crossroads');
+    const world: WorldState = {
+      ...base,
+      tick: 45,
+      players: [
+        { ...base.players[0], x: cellCenterUnits(4), y: cellCenterUnits(6) },
+        { ...base.players[1], x: cellCenterUnits(8), y: cellCenterUnits(6) },
+      ],
+    };
+    const decision = chooseCpuDecision(world, 'hard');
+    expect(decision.reason).toBe('placing');
+    const cell = `${decision.command.trapCellX}:${decision.command.trapCellY}`;
+    const map = getMapDefinition('crossroads');
+    expect(map.obstacleCells.some((obstacle) => `${obstacle.cellX}:${obstacle.cellY}` === cell)).toBe(false);
+    expect(advanceWorld(world, {}, decision.command).players[1].placement?.kind).toBe('bounce');
+  });
+
+  it('avoids revealed enemy traps but does not read hidden trap coordinates', () => {
+    const base = createWorld(2036, ['bounce', 'shock', 'hatch'], ['bounce', 'shock', 'hatch'], 'crossroads');
+    const world: WorldState = {
+      ...base,
+      tick: 45,
+      players: [
+        { ...base.players[0], x: cellCenterUnits(4), y: cellCenterUnits(6) },
+        { ...base.players[1], x: cellCenterUnits(8), y: cellCenterUnits(6) },
+      ],
+    };
+    const first = chooseCpuDecision(world, 'hard');
+    const cellX = first.command.trapCellX as number;
+    const cellY = first.command.trapCellY as number;
+    const trap: TrapState = enemyTrap({ cellX, cellY });
+    const revealed = chooseCpuDecision({
+      ...world,
+      traps: [{ ...trap, discoveredBy: [true, true] }],
+    }, 'hard');
+    expect(`${revealed.command.trapCellX}:${revealed.command.trapCellY}`).not.toBe(`${cellX}:${cellY}`);
+
+    const hidden = chooseCpuDecision({
+      ...world,
+      traps: [{ ...trap, discoveredBy: [true, false] }],
+    }, 'hard');
+    expect(hidden.command.trapCellX).toBe(cellX);
+    expect(hidden.command.trapCellY).toBe(cellY);
   });
 
   it('fires on a fixed cadence when no higher-priority action is active', () => {

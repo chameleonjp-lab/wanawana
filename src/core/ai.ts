@@ -25,6 +25,7 @@ import {
   isCpuAimAligned,
   isCpuReactionTick,
 } from './difficulty.ts';
+import { getMapDefinition } from './maps.ts';
 
 /** A short label explaining why the CPU accepted its command for this tick. */
 export type CpuActionReason =
@@ -121,17 +122,61 @@ function directionTowardCpu(cpu: WorldState['players'][number], target: WorldSta
   return cpu.y < target.y ? 2 : 0;
 }
 
+interface PlacementCandidate {
+  readonly cellX: number;
+  readonly cellY: number;
+  readonly direction: TrapDirection;
+}
+
 function candidateCells(
   cpu: WorldState['players'][number],
   target: WorldState['players'][number],
-): readonly { cellX: number; cellY: number; direction: TrapDirection }[] {
+): readonly PlacementCandidate[] {
   const targetCellX = snapToCell(target.x, ARENA_WIDTH_CELLS);
   const targetCellY = snapToCell(target.y, ARENA_HEIGHT_CELLS);
   const horizontal = Math.abs(target.x - cpu.x) >= Math.abs(target.y - cpu.y);
   const primaryDirection = directionTowardCpu(cpu, target);
-  const offsets: readonly (readonly [number, number])[] = horizontal
-    ? [[primaryDirection === 1 ? 1 : -1, 0], [0, -1], [0, 1], [primaryDirection === 1 ? -1 : 1, 0]]
-    : [[0, primaryDirection === 2 ? 1 : -1], [-1, 0], [1, 0], [0, primaryDirection === 2 ? -1 : 1]];
+  const primaryStepX = primaryDirection === 1 ? 1 : -1;
+  const primaryStepY = primaryDirection === 2 ? 1 : -1;
+  const offsets: Array<readonly [number, number]> = [];
+  const seen = new Set<string>();
+  const addOffset = (offsetX: number, offsetY: number): void => {
+    const cellX = clampInteger(targetCellX + offsetX, 0, ARENA_WIDTH_CELLS - 1);
+    const cellY = clampInteger(targetCellY + offsetY, 0, ARENA_HEIGHT_CELLS - 1);
+    const key = `${cellX}:${cellY}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    offsets.push([offsetX, offsetY]);
+  };
+
+  if (horizontal) {
+    addOffset(primaryStepX, 0);
+    addOffset(0, -1);
+    addOffset(0, 1);
+    addOffset(-primaryStepX, 0);
+  } else {
+    addOffset(0, primaryStepY);
+    addOffset(-1, 0);
+    addOffset(1, 0);
+    addOffset(0, -primaryStepY);
+  }
+
+  // The nearest four cells can be walls on the crossroads map. Expand the
+  // search deterministically instead of repeatedly issuing an illegal order.
+  for (let distance = 2; distance <= 3; distance += 1) {
+    addOffset(primaryStepX * distance, 0);
+    addOffset(0, primaryStepY * distance);
+    addOffset(0, -primaryStepY * distance);
+    addOffset(-primaryStepX * distance, 0);
+    for (let lateral = 1; lateral < distance; lateral += 1) {
+      const forward = distance - lateral;
+      addOffset(primaryStepX * forward, lateral);
+      addOffset(primaryStepX * forward, -lateral);
+      addOffset(-primaryStepX * forward, lateral);
+      addOffset(-primaryStepX * forward, -lateral);
+    }
+  }
+
   return offsets.map(([offsetX, offsetY]) => ({
     cellX: clampInteger(targetCellX + offsetX, 0, ARENA_WIDTH_CELLS - 1),
     cellY: clampInteger(targetCellY + offsetY, 0, ARENA_HEIGHT_CELLS - 1),
@@ -141,13 +186,19 @@ function candidateCells(
 
 function choosePlacement(
   world: WorldState,
-): { cellX: number; cellY: number; direction: TrapDirection } | null {
+): PlacementCandidate | null {
   const cpu = world.players[1];
   const target = world.players[0];
   const candidates = candidateCells(cpu, target);
   const ownTraps = world.traps.filter((trap) => trap.owner === 1);
+  const revealedEnemyTraps = world.traps.filter((trap) => trap.owner === 0 && trap.discoveredBy[1]);
+  const obstacleCells = new Set(
+    getMapDefinition(world.mapId).obstacleCells.map((obstacle) => `${obstacle.cellX}:${obstacle.cellY}`),
+  );
   return candidates.find(({ cellX, cellY }) => {
+    if (obstacleCells.has(`${cellX}:${cellY}`)) return false;
     if (ownTraps.some((trap) => trap.cellX === cellX && trap.cellY === cellY)) return false;
+    if (revealedEnemyTraps.some((trap) => trap.cellX === cellX && trap.cellY === cellY)) return false;
     const overlapsTarget = Math.abs(target.x - cellCenterUnits(cellX)) <= CELL_UNITS / 2 + 3_072
       && Math.abs(target.y - cellCenterUnits(cellY)) <= CELL_UNITS / 2 + 3_072;
     return !overlapsTarget;
