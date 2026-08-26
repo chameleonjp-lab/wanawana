@@ -177,3 +177,6 @@ code { color: #ffd37a; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
 }
+
+.pause-status { min-height: 3.5em; margin-bottom: 0; }
+.primary-button:disabled { cursor: wait; opacity: .68; }

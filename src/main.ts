@@ -3,6 +3,12 @@ import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
 import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
+import { battleOrientationMessage, isPortraitBattleOrientation } from './app/orientation.ts';
+import {
+  canStartBattleAfterResume,
+  remainingResumeSeconds,
+  RESUME_COUNTDOWN_STEP_MS,
+} from './app/resume-gate.ts';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
@@ -91,6 +97,7 @@ const titleView = getElement<HTMLElement>('title-view');
 const unsupportedView = getElement<HTMLElement>('unsupported-view');
 const battleView = getElement<HTMLElement>('battle-view');
 const pauseView = getElement<HTMLElement>('pause-view');
+const pauseStatus = getElement<HTMLElement>('pause-status');
 const resultView = getElement<HTMLElement>('result-view');
 const arena = getElement<HTMLElement>('arena');
 const timeValue = getElement<HTMLElement>('time-value');
@@ -144,6 +151,7 @@ const replayVerifyButton = getElement<HTMLButtonElement>('replay-verify-button')
 const replayVerifyStatus = getElement<HTMLElement>('replay-verify-status');
 const controls = getElement<HTMLElement>('controls');
 const pauseButton = getElement<HTMLButtonElement>('pause-button');
+const resumeButton = getElement<HTMLButtonElement>('resume-button');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
@@ -152,6 +160,11 @@ let world: WorldState | null = null;
 let frameId = 0;
 let resizeFrameId: number | null = null;
 let viewportBaseline: ViewportSize | null = null;
+let viewportStable = true;
+let resumeCountdownTimer: number | null = null;
+let resumeCountdownToken = 0;
+let resumeCountdownStartedAt = 0;
+let pauseMessage = '入力と試合時間は止まっています。表示が安定したら再開してください。';
 let lastFrameTime = 0;
 let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
@@ -216,7 +229,8 @@ function updateScreen(): void {
     ? practiceMode
       ? practiceComplete ? '練習を完了しました' : '操作練習を固定tickで進めています'
       : '固定tickで舞台を動かしています'
-    : state === 'paused' ? '試合を停止しています' : '';
+    : state === 'paused' ? pauseMessage : '';
+  if (state === 'paused') pauseStatus.textContent = pauseMessage;
   updateTrapButtons();
   updateTutorialCard();
   practiceButton.disabled = state !== 'title';
@@ -520,6 +534,27 @@ function readViewportSize(): ViewportSize {
   return createViewportSize(rect.width, rect.height);
 }
 
+function readBattleViewportSize(): ViewportSize {
+  const visualViewport = window.visualViewport;
+  const width = visualViewport?.width || window.innerWidth;
+  const height = visualViewport?.height || window.innerHeight;
+  return createViewportSize(width, height);
+}
+
+function battleViewportIsPortrait(): boolean {
+  return isPortraitBattleOrientation(readBattleViewportSize());
+}
+
+function currentBattleOrientationMessage(): string {
+  return battleOrientationMessage(readBattleViewportSize());
+}
+
+function setPauseMessage(message: string): void {
+  pauseMessage = message;
+  pauseStatus.textContent = message;
+  status.textContent = message;
+}
+
 function captureViewportBaseline(): void {
   viewportBaseline = readViewportSize();
 }
@@ -533,16 +568,32 @@ function scheduleViewportRedraw(): void {
   resizeFrameId = window.requestAnimationFrame(() => {
     resizeFrameId = null;
     if (!world || !pixiApp || machine.state === 'title' || machine.state === 'unsupported') return;
+    if (machine.state === 'paused') {
+      viewportStable = true;
+      return;
+    }
     updateHud();
     drawWorld();
     captureViewportBaseline();
+    viewportStable = true;
   });
 }
 
 function handleViewportResize(message = '画面サイズが変わったため停止しました。表示が落ち着いてから再開してください。'): void {
-  const changed = viewportSizeChanged(viewportBaseline, readViewportSize());
+  const currentSize = readViewportSize();
+  const changed = machine.state === 'battle' && viewportSizeChanged(viewportBaseline, currentSize);
+  const portrait = battleViewportIsPortrait();
   inputController.reset();
-  if (machine.state === 'battle' && changed) pauseGame(message);
+  viewportStable = false;
+  cancelResumeCountdown();
+  if (machine.state === 'battle' && (changed || !portrait)) {
+    if (currentSize.width > 0 && currentSize.height > 0) viewportBaseline = currentSize;
+    pauseGame(portrait ? message : currentBattleOrientationMessage());
+  } else if (machine.state === 'paused') {
+    setPauseMessage(portrait
+      ? '表示領域が変わったため停止しています。表示が落ち着いてから再開してください。'
+      : currentBattleOrientationMessage());
+  }
   scheduleViewportRedraw();
 }
 
@@ -557,6 +608,7 @@ function handleWebglContextLost(event: Event): void {
   const outcome = contextRecovery.loseContext();
   if (!outcome.activeMatch) return;
   inputController.reset();
+  cancelResumeCountdown();
   soundEngine.suspend();
   if (outcome.invalid) {
     invalidateContextRecovery('描画領域を再び失ったため、この試合を無効にしました。');
@@ -572,7 +624,7 @@ function handleWebglContextLost(event: Event): void {
   if (machine.state === 'battle') {
     pauseGame('描画領域を失ったため停止しました。復旧を確認しています。');
   } else if (machine.state === 'paused') {
-    status.textContent = '描画領域を失ったため、復旧を確認しています';
+    setPauseMessage('描画領域を失ったため、復旧を確認しています');
   }
 }
 
@@ -588,7 +640,7 @@ function handleWebglContextRestored(): void {
     if (!contextRecovery.markRestored()) return;
     clearContextRecoveryTimer();
     updateScreen();
-    status.textContent = '描画を復旧しました。再開するボタンを押してください。';
+    setPauseMessage('描画を復旧しました。再開するボタンを押してください。');
   });
 }
 
@@ -1173,27 +1225,47 @@ function loop(timestamp: number): void {
   frameId = requestAnimationFrame(loop);
 }
 
-function pauseGame(message = '試合を停止しています。'): void {
-  if (machine.state !== 'battle') return;
-  cancelAnimationFrame(frameId);
-  inputController.deactivate();
-  soundEngine.suspend();
-  persistResumeSnapshot();
-  machine.transition('paused');
-  updateScreen();
-  status.textContent = message;
+function resetResumeCountdownUi(): void {
+  resumeCountdownTimer = null;
+  resumeCountdownStartedAt = 0;
+  resumeButton.disabled = false;
+  resumeButton.textContent = '再開する';
 }
 
-async function resumeGame(): Promise<void> {
-  if (machine.state !== 'paused') return;
-  if (!contextRecovery.canResume) {
-    status.textContent = '描画の復旧を待っています。';
+function cancelResumeCountdown(): void {
+  if (resumeCountdownTimer !== null) window.clearTimeout(resumeCountdownTimer);
+  resumeCountdownToken += 1;
+  resetResumeCountdownUi();
+  soundEngine.suspend();
+}
+
+async function completeResumeCountdown(token: number, soundPromise: Promise<boolean>): Promise<void> {
+  const soundReady = await soundPromise;
+  if (token !== resumeCountdownToken || machine.state !== 'paused') return;
+
+  const elapsed = Date.now() - resumeCountdownStartedAt;
+  const ready = canStartBattleAfterResume(
+    elapsed,
+    battleViewportIsPortrait(),
+    viewportStable,
+  );
+  if (!ready || !contextRecovery.canResume) {
+    cancelResumeCountdown();
+    if (!contextRecovery.canResume) {
+      setPauseMessage('描画の復旧を待っています。');
+    } else if (!battleViewportIsPortrait()) {
+      setPauseMessage(currentBattleOrientationMessage());
+    } else {
+      setPauseMessage('表示領域が変わったため停止しています。表示が落ち着いてから再開してください。');
+    }
     return;
   }
-  contextRecovery.markResumed();
-  const soundReady = await soundEngine.resume();
-  if (!contextRecovery.canResume) {
-    status.textContent = '描画の復旧を待っています。';
+
+  resumeCountdownToken += 1;
+  resetResumeCountdownUi();
+  if (!contextRecovery.markResumed()) {
+    setPauseMessage('描画の復旧を待っています。');
+    soundEngine.suspend();
     return;
   }
   inputController.activate();
@@ -1202,8 +1274,72 @@ async function resumeGame(): Promise<void> {
   updateHud();
   drawWorld();
   captureViewportBaseline();
+  viewportStable = true;
   if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
+}
+
+function beginResumeCountdown(): void {
+  if (machine.state !== 'paused') return;
+  if (!contextRecovery.canResume) {
+    setPauseMessage('描画の復旧を待っています。');
+    return;
+  }
+  if (!battleViewportIsPortrait()) {
+    setPauseMessage(currentBattleOrientationMessage());
+    return;
+  }
+  if (!viewportStable) {
+    setPauseMessage('表示領域が安定するまで待ってから、もう一度「再開する」を押してください。');
+    return;
+  }
+
+  cancelResumeCountdown();
+  const token = resumeCountdownToken + 1;
+  resumeCountdownToken = token;
+  resumeCountdownStartedAt = Date.now();
+  resumeButton.disabled = true;
+  const soundPromise = soundEngine.resume();
+
+  const updateCountdown = (): void => {
+    if (token !== resumeCountdownToken || machine.state !== 'paused') return;
+    if (!battleViewportIsPortrait()) {
+      cancelResumeCountdown();
+      setPauseMessage(currentBattleOrientationMessage());
+      return;
+    }
+
+    const elapsed = Date.now() - resumeCountdownStartedAt;
+    const remaining = remainingResumeSeconds(elapsed);
+    if (remaining <= 0) {
+      void completeResumeCountdown(token, soundPromise);
+      return;
+    }
+
+    setPauseMessage(`表示領域が安定しています。${remaining}秒後に再開します。`);
+    resumeButton.textContent = `再開準備中…${remaining}`;
+    resumeCountdownTimer = window.setTimeout(updateCountdown, RESUME_COUNTDOWN_STEP_MS);
+  };
+
+  updateCountdown();
+}
+
+function pauseGame(message = '試合を停止しています。'): void {
+  if (machine.state !== 'battle') return;
+  cancelAnimationFrame(frameId);
+  cancelResumeCountdown();
+  inputController.deactivate();
+  soundEngine.suspend();
+  persistResumeSnapshot();
+  pauseMessage = message;
+  machine.transition('paused');
+  updateScreen();
+  setPauseMessage(message);
+}
+
+function resumeGame(): void {
+  if (machine.state !== 'paused') return;
+  beginResumeCountdown();
 }
 
 function appendStat(parent: HTMLElement, label: string, value: string): void {
@@ -1331,8 +1467,14 @@ function verifyPastedReplay(): void {
   replayVerifyStatus.textContent = `検査に失敗しました${mismatch}。${verification.reason ?? '現在のルールでは再現できません。'}`;
 }
 
+function ensurePortraitBattleViewport(): boolean {
+  if (battleViewportIsPortrait()) return true;
+  status.textContent = currentBattleOrientationMessage();
+  return false;
+}
+
 async function resumeBattle(): Promise<void> {
-  if (!resumeSnapshot) return;
+  if (!resumeSnapshot || !ensurePortraitBattleViewport()) return;
   const snapshot = resumeSnapshot;
   selectedLoadout = normalizeTrapLoadout(snapshot.world.loadouts[0]);
   loadoutSlot2.value = selectedLoadout[1];
@@ -1364,6 +1506,7 @@ async function resumeBattle(): Promise<void> {
   updateHud();
   drawWorld();
   captureViewportBaseline();
+  viewportStable = true;
   if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
@@ -1374,6 +1517,7 @@ function discardResume(): void {
 }
 
 async function startPractice(): Promise<void> {
+  if (!ensurePortraitBattleViewport()) return;
   const ready = await ensurePixi();
   if (!ready) return;
   const soundReady = await soundEngine.resume();
@@ -1395,6 +1539,7 @@ async function startPractice(): Promise<void> {
   updateHud();
   drawWorld();
   captureViewportBaseline();
+  viewportStable = true;
   if (!soundReady) status.textContent = '音なしで練習を続けます。';
   startLoop();
 }
@@ -1424,6 +1569,7 @@ async function startMatchFromPractice(): Promise<void> {
 }
 
 async function startBattle(): Promise<void> {
+  if (!ensurePortraitBattleViewport()) return;
   practiceMode = false;
   practiceComplete = false;
   tutorialState = createTutorialState();
@@ -1454,12 +1600,14 @@ async function startBattle(): Promise<void> {
   updateHud();
   drawWorld();
   captureViewportBaseline();
+  viewportStable = true;
   if (!soundReady) status.textContent = '音なしで試合を続けます。';
   startLoop();
 }
 
 function returnToTitle(message = ''): void {
   cancelAnimationFrame(frameId);
+  cancelResumeCountdown();
   clearContextRecoveryTimer();
   contextRecovery.endMatch();
   clearViewportBaseline();
@@ -1489,7 +1637,7 @@ function bindEvents(): void {
     updateScreen();
   });
   getElement<HTMLButtonElement>('pause-button').addEventListener('click', () => pauseGame());
-  getElement<HTMLButtonElement>('resume-button').addEventListener('click', () => void resumeGame());
+  resumeButton.addEventListener('click', () => resumeGame());
   soundEngine.addStateListener(handleSoundStateChange);
   soundButton.addEventListener('click', () => {
     void soundEngine.toggle().then((enabled) => {
@@ -1527,16 +1675,19 @@ function bindEvents(): void {
   copyRecordButton.addEventListener('click', () => void copyMatchRecord());
 
   window.addEventListener('blur', () => {
+    cancelResumeCountdown();
     inputController.reset();
     if (machine.state === 'battle') pauseGame('画面のフォーカスを失ったため停止しました。');
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') {
+      cancelResumeCountdown();
       inputController.reset();
       if (machine.state === 'battle') pauseGame('別の画面へ移ったため停止しました。');
     }
   });
   window.addEventListener('pagehide', () => {
+    cancelResumeCountdown();
     inputController.reset();
     if (machine.state === 'battle') pauseGame('ページが隠れたため停止しました。');
   });
