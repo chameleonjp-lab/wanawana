@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { directionFromAxes, discreteAxis, normalizeKey } from '../../src/input/controller.ts';
+import {
+  directionFromAxes,
+  discreteAxis,
+  inputInterruptionMessage,
+  normalizeKey,
+} from '../../src/input/controller.ts';
 
 describe('input normalization', () => {
   it('keeps the center of the movement pad neutral', () => {
@@ -26,5 +31,10 @@ describe('input normalization', () => {
     expect(directionFromAxes(0, 1)).toBe(2);
     expect(directionFromAxes(-1, 0)).toBe(3);
     expect(directionFromAxes(1, 1)).toBe(1);
+  });
+
+  it('provides a clear pause reason for browser input interruptions', () => {
+    expect(inputInterruptionMessage('pointercancel')).toContain('停止しました');
+    expect(inputInterruptionMessage('lostpointercapture')).toContain('停止しました');
   });
 });

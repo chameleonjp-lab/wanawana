@@ -1,5 +1,8 @@
 import type { InputCommand, TrapDirection, TrapKind } from '../core/types.ts';
 
+export type InputInterruptionReason = 'pointercancel' | 'lostpointercapture';
+export type InputInterruptionHandler = (reason: InputInterruptionReason) => void;
+
 type PointerRole = 'move' | 'fire' | 'inspect' | 'trap';
 
 interface ActivePointer {
@@ -43,6 +46,12 @@ export function normalizeKey(key: string): string {
   return key.length === 1 ? key.toLowerCase() : key;
 }
 
+export function inputInterruptionMessage(reason: InputInterruptionReason): string {
+  return reason === 'pointercancel'
+    ? '入力が中断されたため停止しました。操作を一度離してから再開してください。'
+    : '操作の捕捉が失われたため停止しました。操作を一度離してから再開してください。';
+}
+
 export class InputController {
   private readonly pointers = new Map<number, ActivePointer>();
   private readonly pressedKeys = new Set<string>();
@@ -59,8 +68,12 @@ export class InputController {
   private investigateStartPending = false;
   private active = false;
   private allowedTrapKinds: readonly TrapKind[] | null = null;
+  private interruptionHandling = false;
 
-  public constructor(private readonly root: HTMLElement) {
+  public constructor(
+    private readonly root: HTMLElement,
+    private readonly onInterruption?: InputInterruptionHandler,
+  ) {
     root.addEventListener('pointerdown', this.handlePointerDown);
     root.addEventListener('pointermove', this.handlePointerMove);
     root.addEventListener('pointerup', this.handlePointerUp);
@@ -95,15 +108,21 @@ export class InputController {
   }
 
   public reset(): void {
-    for (const [pointerId, pointer] of this.pointers) {
-      try {
-        if (pointer.target.hasPointerCapture(pointerId)) pointer.target.releasePointerCapture(pointerId);
-      } catch {
-        // Pointer capture may already have been released by the browser.
+    const wasHandlingInterruption = this.interruptionHandling;
+    this.interruptionHandling = true;
+    try {
+      for (const [pointerId, pointer] of this.pointers) {
+        try {
+          if (pointer.target.hasPointerCapture(pointerId)) pointer.target.releasePointerCapture(pointerId);
+        } catch {
+          // Pointer capture may already have been released by the browser.
+        }
       }
+      this.pointers.clear();
+      this.cancelPendingCommands();
+    } finally {
+      this.interruptionHandling = wasHandlingInterruption;
     }
-    this.pointers.clear();
-    this.cancelPendingCommands();
   }
 
   private cancelPendingCommands(): void {
@@ -265,15 +284,39 @@ export class InputController {
     event.preventDefault();
   };
 
-  private handlePointerCancel = (event: PointerEvent): void => {
-    if (!this.pointers.has(event.pointerId)) return;
+  private hasInputState(): boolean {
+    return this.pointers.size > 0
+      || this.pressedKeys.size > 0
+      || this.fireKeyArmed
+      || this.firePending
+      || this.trapKeyArmed !== null
+      || this.trapPending !== null
+      || this.trapPreview !== null
+      || this.investigateHeld
+      || this.investigateStartPending;
+  }
+
+  private handleInputInterruption(
+    reason: InputInterruptionReason,
+    event: PointerEvent,
+  ): void {
+    if (this.interruptionHandling) {
+      event.preventDefault();
+      return;
+    }
     this.reset();
+    if (this.active) this.onInterruption?.(reason);
     event.preventDefault();
+  }
+
+  private handlePointerCancel = (event: PointerEvent): void => {
+    if (!this.pointers.has(event.pointerId) && !this.hasInputState()) return;
+    this.handleInputInterruption('pointercancel', event);
   };
 
   private handleLostPointerCapture = (event: PointerEvent): void => {
     if (!this.pointers.has(event.pointerId)) return;
-    this.reset();
+    this.handleInputInterruption('lostpointercapture', event);
   };
 
   private releasePointer(pointerId: number, pointer: ActivePointer): void {
