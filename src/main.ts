@@ -3,7 +3,6 @@ import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
 import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
-import { OfflineUpdateManager } from './app/offline.ts';
 import { AppStateMachine } from './app/state.ts';
 import { SoundEngine } from './audio/sound.ts';
 import { chooseCpuDecision } from './core/ai.ts';
@@ -145,8 +144,6 @@ const replayVerifyButton = getElement<HTMLButtonElement>('replay-verify-button')
 const replayVerifyStatus = getElement<HTMLElement>('replay-verify-status');
 const controls = getElement<HTMLElement>('controls');
 const pauseButton = getElement<HTMLButtonElement>('pause-button');
-const updateCard = getElement<HTMLElement>('update-card');
-const updateButton = getElement<HTMLButtonElement>('update-button');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
@@ -195,7 +192,6 @@ const inputController = new InputController(controls, (reason) => {
 });
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
-const offlineUpdates = new OfflineUpdateManager();
 let contextRecoveryTimer: number | null = null;
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -226,7 +222,6 @@ function updateScreen(): void {
   practiceButton.disabled = state !== 'title';
   pauseButton.disabled = practiceMode && practiceComplete;
   updateResumePanel();
-  updateOfflineCard();
 }
 
 function updateSoundButton(): void {
@@ -358,10 +353,6 @@ function persistTutorialCompletion(): void {
     tutorialStorageAvailable = false;
   }
   updatePracticeEntry();
-}
-
-function updateOfflineCard(): void {
-  setVisible(updateCard, (machine.state === 'title' || machine.state === 'result') && offlineUpdates.state === 'ready');
 }
 
 function loadMatchSettings(): void {
@@ -1534,7 +1525,6 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', () => returnToTitle());
   copyRecordButton.addEventListener('click', () => void copyMatchRecord());
-  updateButton.addEventListener('click', () => offlineUpdates.acceptUpdate());
 
   window.addEventListener('blur', () => {
     inputController.reset();
@@ -1572,8 +1562,6 @@ updateDifficultyLabel();
 updateLoadoutLabel();
 updateMapLabel();
 updateCareerSummary();
-offlineUpdates.addStateListener(updateOfflineCard);
-void offlineUpdates.register(BUILD_COMMIT, import.meta.env.BASE_URL);
 status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
 if (!webglAvailable()) {
   machine.transition('unsupported');
