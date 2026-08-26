@@ -684,7 +684,24 @@ async function ensurePixi(): Promise<boolean> {
     pixiApp = app;
     drawWorld();
     return true;
-  } catch {function buildStaticArena(
+  } catch {
+    machine.transition('unsupported');
+    updateScreen();
+    return false;
+  }
+}
+
+function readInput(): InputCommand {
+  if (world && inputController.previewTrap) {
+    inputController.capturePreviewCell(
+      snapToCell(world.players[0].x, ARENA_WIDTH_CELLS),
+      snapToCell(world.players[0].y, ARENA_HEIGHT_CELLS),
+    );
+  }
+  return inputController.readCommand();
+}
+
+function buildStaticArena(
   layer: Container,
   map: ReturnType<typeof getMapDefinition>,
   width: number,
@@ -967,20 +984,6 @@ function drawWorld(): void {
 
   hideUnusedDynamicGraphics(state, dynamicIndex);
   pixiApp.renderer.render(pixiApp.stage);
-}
-
-ld(token);
-  }
-
-  for (const shot of world.shots) {
-    const x = offsetX + cellToPixels(shot.x, pixelsPerCell);
-    const y = offsetY + cellToPixels(shot.y, pixelsPerCell);
-    const projectile = new Graphics();
-    projectile.circle(x, y, Math.max(4, pixelsPerCell * 0.12)).fill({ color: 0xfff2b0 });
-    stage.addChild(projectile);
-  }
-
-  pixiApp.renderer.render(stage);
 }
 
 function updateHud(): void {

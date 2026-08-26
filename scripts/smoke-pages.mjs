@@ -69,8 +69,8 @@ for (const relativePath of references) {
   const resource = await fetchText(relativePath);
   const expected = expectedContentTypes(relativePath);
   if (expected) requireContentType(resource, expected, relativePath);
-  if (/\.(?:js|mjs)$/i.test(relativePath)) assertNoServiceWorker(resource.text, relativePath);
   else if (!resource.contentType) throw new Error(`${relativePath} has no content type`);
+  if (/\.(?:js|mjs)$/i.test(relativePath)) assertNoServiceWorker(resource.text, relativePath);
 }
 
 console.log(`published artifact smoke verified: ${references.size + 2} resources at ${index.url}`);
