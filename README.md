@@ -23,7 +23,7 @@ GitHub Pages向けの公開先は `/wanawana/` です。1.0では、WebGLを表�
 公開用のActionsは `dist/` を一度だけ作り、検査済みのPages artifactをそのまま公開します。設定の境界は [`docs/m8-pages-deploy.md`](docs/m8-pages-deploy.md) に記録しています。
 
 Pages公開後は、HTML・manifestと参照資源を公開URLから確認するスモーク検査を自動実行します。境界は [`docs/m8-pages-smoke.md`](docs/m8-pages-smoke.md) に記録しています。
-実機性能の測定手順と合否目安は [`docs/m8-performance.md`](docs/m8-performance.md) に記録しています。5試合の最終確認は実機で行います。
+実機性能の測定手順と合否目安は [`docs/m8-performance.md`](docs/m8-performance.md) に記録しています。軽量表示はルールを変えずに描画解像度と発動演出を抑えます。5試合の最終確認は実機で行います。
 
 1.0ではオフライン起動とService Workerによる更新を提供しません。Service Workerは登録せず、将来追加する場合の境界だけを [`docs/m8-offline-updates.md`](docs/m8-offline-updates.md) に残しています。
 

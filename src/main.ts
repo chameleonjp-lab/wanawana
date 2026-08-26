@@ -134,6 +134,7 @@ const careerSummaryValue = getElement<HTMLElement>('career-summary-value');
 const careerSummaryNote = getElement<HTMLElement>('career-summary-note');
 const clearCareerSummaryButton = getElement<HTMLButtonElement>('clear-career-summary');
 const settingsNote = getElement<HTMLElement>('settings-note');
+const lightweightToggle = getElement<HTMLInputElement>('lightweight-toggle');
 const resetSettingsButton = getElement<HTMLButtonElement>('reset-settings');
 const practiceEntryNote = getElement<HTMLElement>('practice-entry-note');
 const practiceButton = getElement<HTMLButtonElement>('practice-button');
@@ -188,6 +189,7 @@ let accumulator = 0;
 let cpuDifficulty: CpuDifficulty = 'normal';
 let selectedLoadout: TrapLoadout = DEFAULT_TRAP_LOADOUT;
 let selectedMap: MapId = DEFAULT_MAP_ID;
+let lightweightDisplay = false;
 let matchSummary: MatchSummary = emptyMatchSummary();
 let summaryStorageAvailable = true;
 let settingsStorageAvailable = true;
@@ -341,7 +343,7 @@ function updateCareerSummary(): void {
 
 function updateSettingsNote(): void {
   settingsNote.textContent = settingsStorageAvailable
-    ? '難度・舞台・罠ロードアウトは、この端末に保存されます。'
+    ? '難度・舞台・罠ロードアウト・軽量表示は、この端末に保存されます。'
     : '設定を保存できない端末です。選んだ内容はこの画面を閉じると初期値へ戻ります。';
 }
 
@@ -400,6 +402,8 @@ function loadMatchSettings(): void {
     mapSelect.value = settings.mapId;
     loadoutSlot2.value = settings.loadout[1];
     loadoutSlot3.value = settings.loadout[2];
+    lightweightDisplay = settings.lightweight;
+    lightweightToggle.checked = lightweightDisplay;
   } catch {
     settingsStorageAvailable = false;
   }
@@ -409,7 +413,7 @@ function loadMatchSettings(): void {
 function persistMatchSettings(): void {
   if (!settingsStorageAvailable) return;
   try {
-    const settings = createMatchSettings(cpuDifficulty, selectedMap, selectedLoadout);
+    const settings = createMatchSettings(cpuDifficulty, selectedMap, selectedLoadout, lightweightDisplay);
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, serializeMatchSettings(settings));
   } catch {
     settingsStorageAvailable = false;
@@ -418,12 +422,14 @@ function persistMatchSettings(): void {
 }
 
 function resetMatchSettings(): void {
-  if (!window.confirm('ワナワナの難度・舞台・罠ロードアウトを初期値へ戻しますか？')) return;
+  if (!window.confirm('ワナワナの難度・舞台・罠ロードアウト・軽量表示を初期値へ戻しますか？')) return;
   const defaults = defaultMatchSettings();
   difficultySelect.value = defaults.difficulty;
   mapSelect.value = defaults.mapId;
   loadoutSlot2.value = defaults.loadout[1];
   loadoutSlot3.value = defaults.loadout[2];
+  lightweightDisplay = defaults.lightweight;
+  lightweightToggle.checked = lightweightDisplay;
   try {
     window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
     settingsStorageAvailable = true;
@@ -434,6 +440,7 @@ function resetMatchSettings(): void {
   updateLoadoutLabel();
   updateMapLabel();
   updateSettingsNote();
+  applyRendererSettings();
   status.textContent = settingsStorageAvailable
     ? '設定を初期値へ戻しました。'
     : '設定を初期値へ戻しました（保存は利用できません）。';
@@ -545,6 +552,18 @@ function webglAvailable(): boolean {
 function reducedMotionPreferred(): boolean {
   return typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function desiredRendererResolution(): number {
+  return Math.min(window.devicePixelRatio || 1, lightweightDisplay ? 1.25 : 2);
+}
+
+function applyRendererSettings(): void {
+  if (!pixiApp) return;
+  const width = arena.clientWidth;
+  const height = arena.clientHeight;
+  if (width <= 0 || height <= 0) return;
+  pixiApp.renderer.resize(width, height, desiredRendererResolution());
 }
 
 function clearContextRecoveryTimer(): void {
@@ -669,7 +688,10 @@ function handleWebglContextRestored(): void {
 }
 
 async function ensurePixi(): Promise<boolean> {
-  if (pixiApp) return true;
+  if (pixiApp) {
+    applyRendererSettings();
+    return true;
+  }
   if (!webglAvailable()) {
     machine.transition('unsupported');
     updateScreen();
@@ -685,7 +707,7 @@ async function ensurePixi(): Promise<boolean> {
       resizeTo: arena,
       backgroundColor: 0x0f0d1b,
       antialias: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      resolution: desiredRendererResolution(),
       preserveDrawingBuffer: false,
     });
     arena.replaceChildren(app.canvas);
@@ -853,7 +875,7 @@ function hideUnusedDynamicGraphics(state: ArenaRenderState, usedCount: number): 
 
 function drawWorld(): void {
   if (!pixiApp || !world) return;
-  const motion = getMotionProfile(reducedMotionPreferred());
+  const motion = getMotionProfile(reducedMotionPreferred(), lightweightDisplay);
   const map = getMapDefinition(world.mapId);
   const width = Math.max(1, arena.clientWidth);
   const height = Math.max(1, arena.clientHeight);
@@ -1411,6 +1433,7 @@ async function completeResumeCountdown(token: number, soundPromise: Promise<bool
   machine.transition('battle');
   updateScreen();
   updateHud();
+  applyRendererSettings();
   drawWorld();
   captureViewportBaseline();
   viewportStable = true;
@@ -1566,7 +1589,7 @@ function renderPerformanceReport(report: MatchPerformanceReport): void {
     ? '入力→次回描画は未計測'
     : '入力→次回描画' + report.inputSamples + '件：P95 '
       + formatPerformanceMs(report.inputP95Ms) + ' / 最大 ' + formatPerformanceMs(report.inputMaxMs);
-  resultPerformance.textContent = 'この試合の簡易計測（rAF基準）。' + frameSummary + '。'
+  resultPerformance.textContent = `この試合の簡易計測（rAF基準・${lightweightDisplay ? '軽量表示' : '通常表示'}）。` + frameSummary + '。'
     + inputSummary + '。数値は実機確認用の目安です。';
   copyPerformanceButton.disabled = report.frameSamples === 0 && report.inputSamples === 0;
   performanceCopyStatus.textContent = '';
@@ -1585,11 +1608,13 @@ async function copyPerformanceReport(): Promise<void> {
       width: arena.clientWidth,
       height: arena.clientHeight,
       devicePixelRatio: window.devicePixelRatio || 1,
+      renderResolution: desiredRendererResolution(),
     },
     settings: {
       difficulty: cpuDifficulty,
       map: selectedMap,
       loadout: [...selectedLoadout],
+      lightweight: lightweightDisplay,
     },
     report: completedPerformanceReport,
   };
@@ -1751,6 +1776,7 @@ async function startPractice(): Promise<void> {
   machine.transition('battle');
   updateScreen();
   updateHud();
+  applyRendererSettings();
   drawWorld();
   captureViewportBaseline();
   viewportStable = true;
@@ -1821,6 +1847,7 @@ async function startBattle(): Promise<void> {
   machine.transition('battle');
   updateScreen();
   updateHud();
+  applyRendererSettings();
   drawWorld();
   captureViewportBaseline();
   viewportStable = true;
@@ -1872,6 +1899,11 @@ function bindEvents(): void {
   });
   clearCareerSummaryButton.addEventListener('click', clearMatchSummary);
   resetSettingsButton.addEventListener('click', resetMatchSettings);
+  lightweightToggle.addEventListener('change', () => {
+    lightweightDisplay = lightweightToggle.checked;
+    applyRendererSettings();
+    persistMatchSettings();
+  });
   resumeMatchButton.addEventListener('click', () => void resumeBattle());
   discardResumeButton.addEventListener('click', discardResume);
   replayVerifyButton.addEventListener('click', verifyPastedReplay);

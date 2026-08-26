@@ -18,10 +18,17 @@ const REDUCED_MOTION: MotionProfile = {
   showRays: false,
 };
 
+const LIGHTWEIGHT_MOTION: MotionProfile = {
+  eventMarkerTicks: 30,
+  burstTicks: 0,
+  showRays: false,
+};
+
 /**
  * Chooses rendering-only feedback. This must never be used by the fixed
  * simulation, input acceptance, collision, or result rules.
  */
-export function getMotionProfile(reducedMotion: boolean): MotionProfile {
-  return reducedMotion ? REDUCED_MOTION : NORMAL_MOTION;
+export function getMotionProfile(reducedMotion: boolean, lightweight = false): MotionProfile {
+  if (reducedMotion) return REDUCED_MOTION;
+  return lightweight ? LIGHTWEIGHT_MOTION : NORMAL_MOTION;
 }

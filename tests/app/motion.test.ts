@@ -17,4 +17,12 @@ describe('render motion profile', () => {
       showRays: false,
     });
   });
+
+  it('keeps the lightweight mode separate from reduced-motion preferences', () => {
+    expect(getMotionProfile(false, true)).toEqual({
+      eventMarkerTicks: 30,
+      burstTicks: 0,
+      showRays: false,
+    });
+  });
 });
