@@ -75,7 +75,7 @@ import {
   type TrapState,
   type WorldState,
 } from './core/types.ts';
-import { InputController } from './input/controller.ts';
+import { InputController, inputInterruptionMessage } from './input/controller.ts';
 
 const FRAME_MS = 1_000 / 60;
 const MAX_TICKS_PER_FRAME = 5;
@@ -190,7 +190,9 @@ let practiceComplete = false;
 let tutorialState: TutorialState = createTutorialState();
 let tutorialStorageAvailable = true;
 let tutorialCompleted = false;
-const inputController = new InputController(controls);
+const inputController = new InputController(controls, (reason) => {
+  if (machine.state === 'battle') pauseGame(inputInterruptionMessage(reason));
+});
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
 const offlineUpdates = new OfflineUpdateManager();
