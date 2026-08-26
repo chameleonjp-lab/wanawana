@@ -51,6 +51,10 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .difficulty-choice { display: grid; grid-template-columns: 1fr minmax(140px, 180px); gap: 8px 12px; align-items: center; margin-top: 18px; padding: 14px; border: 1px solid #5a4c78; border-radius: 14px; background: #211a37; }
 .settings-note { margin: 12px 0 0; color: #cfc3df; font-size: .74rem; line-height: 1.45; }
 .settings-reset { margin-top: 2px; min-height: 36px; font-size: .74rem; }
+.performance-toggle { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; padding: 12px 14px; border: 1px solid #5a4c78; border-radius: 14px; color: #f7f1e7; background: #211a37; cursor: pointer; }
+.performance-toggle input { flex: 0 0 auto; width: 20px; height: 20px; margin: 2px 0 0; accent-color: #ffd37a; }
+.performance-toggle span { display: grid; gap: 4px; font-size: .82rem; font-weight: 700; }
+.performance-toggle small { color: #cfc3df; font-size: .68rem; font-weight: 500; line-height: 1.45; }
 .practice-entry { display: grid; gap: 4px; margin-top: 18px; padding: 14px; border: 1px solid #8cbdff; border-radius: 14px; background: #211f3b; }
 .practice-entry h3 { margin: 0; color: #f7f1e7; font-size: .95rem; }
 .practice-entry p { margin: 0; color: #cfc3df; font-size: .78rem; line-height: 1.5; }
