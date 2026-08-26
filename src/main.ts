@@ -1486,12 +1486,18 @@ async function resumeBattle(): Promise<void> {
   updateLoadoutLabel();
   updateMapLabel();
   persistMatchSettings();
-  const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
   if (!ready || resumeSnapshot !== snapshot) return;
+  if (!ensurePortraitBattleViewport()) {
+    soundEngine.suspend();
+    return;
+  }
 
   clearResumeSnapshot();
   inputController.setTrapLoadout(selectedLoadout);
+  inputController.reset();
+  inputController.deactivate();
+  soundEngine.suspend();
   contextRecovery.startMatch();
   world = snapshot.world;
   resetBlueprintTelemetry(world);
@@ -1500,15 +1506,11 @@ async function resumeBattle(): Promise<void> {
   completedReplay = null;
   copyRecordButton.disabled = true;
   replayCopyStatus.textContent = '中断から再開した試合は、再現記録を作りません。';
-  inputController.activate();
-  machine.transition('battle');
-  updateScreen();
-  updateHud();
-  drawWorld();
-  captureViewportBaseline();
   viewportStable = true;
-  if (!soundReady) status.textContent = '音なしで試合を続けます。';
-  startLoop();
+  pauseMessage = '中断した試合を読み込みました。表示が安定したら「再開する」を押してください。';
+  machine.transition('paused');
+  updateScreen();
+  setPauseMessage(pauseMessage);
 }
 
 function discardResume(): void {
@@ -1521,6 +1523,10 @@ async function startPractice(): Promise<void> {
   const ready = await ensurePixi();
   if (!ready) return;
   const soundReady = await soundEngine.resume();
+  if (!ensurePortraitBattleViewport()) {
+    soundEngine.suspend();
+    return;
+  }
   practiceMode = true;
   practiceComplete = false;
   tutorialState = createTutorialState();
@@ -1579,6 +1585,10 @@ async function startBattle(): Promise<void> {
   persistMatchSettings();
   const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
+  if (!ensurePortraitBattleViewport()) {
+    soundEngine.suspend();
+    return;
+  }
   if (!ready) {
     soundEngine.suspend();
     updateSoundButton();
