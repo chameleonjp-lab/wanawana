@@ -13,6 +13,7 @@ describe('title settings', () => {
       difficulty: 'normal',
       mapId: 'gearworks',
       loadout: ['bounce', 'shock', 'hatch'],
+      lightweight: false,
     });
   });
 
