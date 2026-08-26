@@ -1,7 +1,7 @@
 export type AppState = 'title' | 'battle' | 'paused' | 'result' | 'unsupported';
 
 const transitions: Record<AppState, readonly AppState[]> = {
-  title: ['battle', 'unsupported'],
+  title: ['battle', 'paused', 'unsupported'],
   battle: ['paused', 'result', 'title'],
   paused: ['battle', 'title', 'unsupported'],
   result: ['battle', 'title'],

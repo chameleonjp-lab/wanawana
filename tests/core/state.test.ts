@@ -12,6 +12,14 @@ describe('application state machine', () => {
     expect(machine.state).toBe('title');
   });
 
+  it('allows a saved match to enter the paused resume gate from the title', () => {
+    const machine = new AppStateMachine();
+    machine.transition('paused');
+    expect(machine.state).toBe('paused');
+    machine.transition('battle');
+    expect(machine.state).toBe('battle');
+  });
+
   it('rejects an invalid jump', () => {
     const machine = new AppStateMachine();
     expect(() => machine.transition('result')).toThrow('Invalid transition');
