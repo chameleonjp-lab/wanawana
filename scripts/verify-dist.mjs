@@ -12,6 +12,25 @@ async function mustRead(relativePath) {
   }
 }
 
+function assertNoServiceWorker(value, label) {
+  if (/\bserviceWorker\b|service-worker(?:\.js)?/i.test(value)) {
+    throw new Error(`${label}にService Workerの登録または同梱があります`);
+  }
+}
+
+async function assertNoServiceWorkerInDirectory(directory, relativeDirectory = '') {
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      await assertNoServiceWorkerInDirectory(entryPath, relativePath);
+    } else if (/\.(?:html|js|mjs)$/i.test(entry.name)) {
+      assertNoServiceWorker(await mustRead(relativePath), `dist/${relativePath}`);
+    }
+  }
+}
+
 async function mustExist(relativePath) {
   try {
     await stat(path.join(DIST, relativePath));
@@ -45,6 +64,8 @@ function collectManifestAssets(value, assets) {
 
 const html = await mustRead('index.html');
 const manifestText = await mustRead('manifest.json');
+assertNoServiceWorker(html, 'dist/index.html');
+await assertNoServiceWorkerInDirectory(DIST);
 
 if (!html.includes('Content-Security-Policy')) throw new Error('本番HTMLにCSP metaがありません');
 if (!html.includes(BASE_PATH)) throw new Error('本番HTMLに/wanawana/の公開先がありません');

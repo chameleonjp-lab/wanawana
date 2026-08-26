@@ -7,6 +7,12 @@ async function fetchText(relativePath) {
   return { url, text: await response.text(), contentType: response.headers.get('content-type') ?? '' };
 }
 
+function assertNoServiceWorker(value, label) {
+  if (/\bserviceWorker\b|service-worker(?:\.js)?/i.test(value)) {
+    throw new Error(`${label} contains a Service Worker registration or bundle`);
+  }
+}
+
 function requireContentType(resource, expected, label = resource.url.pathname) {
   const contentType = resource.contentType.toLowerCase();
   if (!expected.some((pattern) => pattern.test(contentType))) {
@@ -38,6 +44,7 @@ function addManifestAssets(value, references) {
 
 const index = await fetchText('');
 requireContentType(index, [/text\/html/], 'published index.html');
+assertNoServiceWorker(index.text, 'published index.html');
 if (!index.text.includes('Content-Security-Policy')) throw new Error('published HTML has no CSP meta');
 if (!index.text.includes('/wanawana/')) throw new Error('published HTML has no /wanawana/ base path');
 
@@ -63,6 +70,7 @@ for (const relativePath of references) {
   const expected = expectedContentTypes(relativePath);
   if (expected) requireContentType(resource, expected, relativePath);
   else if (!resource.contentType) throw new Error(`${relativePath} has no content type`);
+  if (/\.(?:js|mjs)$/i.test(relativePath)) assertNoServiceWorker(resource.text, relativePath);
 }
 
 console.log(`published artifact smoke verified: ${references.size + 2} resources at ${index.url}`);
