@@ -30,10 +30,6 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .site-header h1 { margin: 0; font-size: clamp(2.3rem, 13vw, 4.7rem); letter-spacing: .16em; }
 .eyebrow { margin: 0 0 8px; color: #f2b8ff; font-size: .74rem; letter-spacing: .18em; font-weight: 700; }
 .status { min-height: 1.5em; margin: 10px 0 0; color: #d7cde8; font-size: .9rem; }
-.update-card { margin: 0 0 14px; padding: 12px 14px; border: 1px solid #8cbdff; border-radius: 14px; background: #211f3b; }
-.update-card.is-hidden { display: none; }
-.update-card p { margin: 0; color: #ddd4e8; font-size: .78rem; line-height: 1.5; }
-.update-card .secondary-button { margin-top: 8px; }
 
 .screen {
   width: 100%;

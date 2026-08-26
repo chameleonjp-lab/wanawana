@@ -50,12 +50,6 @@ try {
   throw new Error('published manifest.json is not valid JSON');
 }
 
-const serviceWorker = await fetchText('sw.js');
-requireContentType(serviceWorker, [/javascript/, /ecmascript/], 'published sw.js');
-if (!serviceWorker.text.includes('wanawana-') || !serviceWorker.text.includes('SKIP_WAITING')) {
-  throw new Error('published Service Worker is missing version isolation or update control');
-}
-
 const references = new Set();
 for (const match of index.text.matchAll(/(?:src|href)="([^"#]+)"/g)) {
   const value = match[1];
@@ -71,4 +65,4 @@ for (const relativePath of references) {
   else if (!resource.contentType) throw new Error(`${relativePath} has no content type`);
 }
 
-console.log(`published artifact smoke verified: ${references.size + 3} resources at ${index.url}`);
+console.log(`published artifact smoke verified: ${references.size + 2} resources at ${index.url}`);

@@ -45,13 +45,9 @@ function collectManifestAssets(value, assets) {
 
 const html = await mustRead('index.html');
 const manifestText = await mustRead('manifest.json');
-const serviceWorker = await mustRead('sw.js');
 
 if (!html.includes('Content-Security-Policy')) throw new Error('本番HTMLにCSP metaがありません');
 if (!html.includes(BASE_PATH)) throw new Error('本番HTMLに/wanawana/の公開先がありません');
-if (!serviceWorker.includes('wanawana-') || !serviceWorker.includes('SKIP_WAITING')) {
-  throw new Error('Service Workerの版分離または更新切替が確認できません');
-}
 
 let manifest;
 try {
