@@ -2,6 +2,7 @@ import type { InputCommand, TrapDirection, TrapKind } from '../core/types.ts';
 
 export type InputInterruptionReason = 'pointercancel' | 'lostpointercapture';
 export type InputInterruptionHandler = (reason: InputInterruptionReason) => void;
+export type InputActivityHandler = () => void;
 
 type PointerRole = 'move' | 'fire' | 'inspect' | 'trap';
 
@@ -73,6 +74,7 @@ export class InputController {
   public constructor(
     private readonly root: HTMLElement,
     private readonly onInterruption?: InputInterruptionHandler,
+    private readonly onInputActivity?: InputActivityHandler,
   ) {
     root.addEventListener('pointerdown', this.handlePointerDown);
     root.addEventListener('pointermove', this.handlePointerMove);
@@ -123,6 +125,10 @@ export class InputController {
     } finally {
       this.interruptionHandling = wasHandlingInterruption;
     }
+  }
+
+  private reportInputActivity(): void {
+    this.onInputActivity?.();
   }
 
   private cancelPendingCommands(): void {
@@ -248,6 +254,7 @@ export class InputController {
       this.trapPreviewCell = null;
       this.trapPreviewDirection = 0;
     }
+    this.reportInputActivity();
     try {
       target.setPointerCapture(event.pointerId);
     } catch {
@@ -259,6 +266,7 @@ export class InputController {
   private handlePointerMove = (event: PointerEvent): void => {
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) return;
+    this.reportInputActivity();
     pointer.x = event.clientX;
     pointer.y = event.clientY;
     event.preventDefault();
@@ -267,6 +275,7 @@ export class InputController {
   private handlePointerUp = (event: PointerEvent): void => {
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) return;
+    this.reportInputActivity();
     const rootRect = this.root.getBoundingClientRect();
     const insideRoot = event.clientX >= rootRect.left && event.clientX <= rootRect.right
       && event.clientY >= rootRect.top && event.clientY <= rootRect.bottom;
@@ -334,6 +343,7 @@ export class InputController {
     const trapKind = TRAP_KEYS.get(key);
     if (!MOVE_KEYS.has(key) && key !== FIRE_KEY && key !== INSPECT_KEY && !trapKind) return;
     event.preventDefault();
+    this.reportInputActivity();
     if (key === FIRE_KEY) {
       if (!event.repeat) this.fireKeyArmed = true;
       return;
@@ -364,6 +374,7 @@ export class InputController {
     const trapKind = TRAP_KEYS.get(key);
     if (!MOVE_KEYS.has(key) && key !== FIRE_KEY && key !== INSPECT_KEY && !trapKind) return;
     event.preventDefault();
+    this.reportInputActivity();
     if (key === FIRE_KEY) {
       if (this.fireKeyArmed) this.firePending = true;
       this.fireKeyArmed = false;

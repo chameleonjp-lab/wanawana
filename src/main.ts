@@ -2,6 +2,7 @@ import { Application, Container, Graphics } from 'pixi.js';
 import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
+import { MatchPerformanceMonitor, type MatchPerformanceReport } from './app/performance.ts';
 import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
 import { battleOrientationMessage, isPortraitBattleOrientation } from './app/orientation.ts';
 import {
@@ -113,6 +114,9 @@ const resultHistory = getElement<HTMLElement>('result-history');
 const resultHash = getElement<HTMLElement>('result-hash');
 const copyRecordButton = getElement<HTMLButtonElement>('copy-record-button');
 const replayCopyStatus = getElement<HTMLElement>('replay-copy-status');
+const resultPerformance = getElement<HTMLElement>('result-performance');
+const copyPerformanceButton = getElement<HTMLButtonElement>('copy-performance-button');
+const performanceCopyStatus = getElement<HTMLElement>('performance-copy-status');
 const trapPreview = getElement<HTMLElement>('trap-preview');
 const inspectButton = getElement<HTMLButtonElement>('inspect-button');
 const soundButton = getElement<HTMLButtonElement>('sound-button');
@@ -192,6 +196,7 @@ let resumeStorageAvailable = true;
 let summaryRecordedWorld: WorldState | null = null;
 let replayRecorder: ReplayRecorder | null = null;
 let completedReplay: MatchReplay | null = null;
+let completedPerformanceReport: MatchPerformanceReport | null = null;
 interface MovementSample {
   readonly tick: number;
   readonly x: number;
@@ -214,9 +219,14 @@ let practiceComplete = false;
 let tutorialState: TutorialState = createTutorialState();
 let tutorialStorageAvailable = true;
 let tutorialCompleted = false;
-const inputController = new InputController(controls, (reason) => {
-  if (machine.state === 'battle') pauseGame(inputInterruptionMessage(reason));
-});
+const performanceMonitor = new MatchPerformanceMonitor();
+const inputController = new InputController(
+  controls,
+  (reason) => {
+    if (machine.state === 'battle') pauseGame(inputInterruptionMessage(reason));
+  },
+  () => performanceMonitor.markInput(performance.now()),
+);
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
 let contextRecoveryTimer: number | null = null;
@@ -1298,6 +1308,7 @@ function startLoop(): void {
   cancelAnimationFrame(frameId);
   lastFrameTime = 0;
   accumulator = 0;
+  performanceMonitor.startFrameSegment();
   frameId = requestAnimationFrame(loop);
 }
 
@@ -1343,6 +1354,7 @@ function loop(timestamp: number): void {
 
   updateHud();
   drawWorld();
+  performanceMonitor.recordFrame(timestamp);
   updateTutorialCard();
   if (practiceMode && practiceComplete) return;
   if (world.phase === 'result') {
@@ -1529,6 +1541,68 @@ function renderResultDetails(): void {
   resultDetails.append(list);
 }
 
+
+function formatPerformanceMs(value: number | null): string {
+  return value === null ? '—' : value.toFixed(1) + 'ms';
+}
+
+function resetPerformanceResult(): void {
+  completedPerformanceReport = null;
+  resultPerformance.textContent = '試合終了後に、この端末での簡易計測を表示します。';
+  copyPerformanceButton.disabled = true;
+  performanceCopyStatus.textContent = '';
+}
+
+function renderPerformanceReport(report: MatchPerformanceReport): void {
+  const frameSummary = report.frameSamples === 0
+    ? 'フレーム間隔は未計測'
+    : 'フレーム間隔' + report.frameSamples + '件：P95 ' + formatPerformanceMs(report.frameP95Ms)
+      + ' / P99 ' + formatPerformanceMs(report.frameP99Ms)
+      + ' / 最大 ' + formatPerformanceMs(report.frameMaxMs)
+      + '。20ms超 ' + report.frameOver20Ms + '件、34ms超 ' + report.frameOver34Ms
+      + '件、67ms超 ' + report.frameOver67Ms + '件、100ms以上 ' + report.frameOver100Ms
+      + '件、150ms以上 ' + report.frameOver150Ms + '件';
+  const inputSummary = report.inputSamples === 0
+    ? '入力→次回描画は未計測'
+    : '入力→次回描画' + report.inputSamples + '件：P95 '
+      + formatPerformanceMs(report.inputP95Ms) + ' / 最大 ' + formatPerformanceMs(report.inputMaxMs);
+  resultPerformance.textContent = 'この試合の簡易計測（rAF基準）。' + frameSummary + '。'
+    + inputSummary + '。数値は実機確認用の目安です。';
+  copyPerformanceButton.disabled = report.frameSamples === 0 && report.inputSamples === 0;
+  performanceCopyStatus.textContent = '';
+}
+
+async function copyPerformanceReport(): Promise<void> {
+  if (!completedPerformanceReport) {
+    performanceCopyStatus.textContent = 'コピーできる性能記録がありません。';
+    return;
+  }
+  const record = {
+    format: 'wanawana-performance-v1',
+    buildCommit: BUILD_COMMIT,
+    userAgent: navigator.userAgent,
+    viewport: {
+      width: arena.clientWidth,
+      height: arena.clientHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    },
+    settings: {
+      difficulty: cpuDifficulty,
+      map: selectedMap,
+      loadout: [...selectedLoadout],
+    },
+    report: completedPerformanceReport,
+  };
+  const serialized = JSON.stringify(record);
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(serialized);
+    performanceCopyStatus.textContent = '性能記録をコピーしました（' + Math.ceil(serialized.length / 1024) + 'KB）。';
+  } catch {
+    performanceCopyStatus.textContent = 'コピーできませんでした。安全な接続で再度お試しください。';
+  }
+}
+
 function finishBattle(): void {
   cancelAnimationFrame(frameId);
   clearContextRecoveryTimer();
@@ -1539,6 +1613,7 @@ function finishBattle(): void {
   }
   clearResumeSnapshot();
   inputController.deactivate();
+  const performanceReport = performanceMonitor.finish();
   if (!world) return;
   if (world.result === 'technical-invalid') {
     // A technical stop is not a playable result. Do not show it as a win,
@@ -1555,6 +1630,8 @@ function finishBattle(): void {
   recordFinishedMatch(report);
   resultSummary.textContent = `${report.resultLabel}。${world.tick}tickで試合を終えました。`;
   renderResultDetails();
+  completedPerformanceReport = performanceReport;
+  renderPerformanceReport(performanceReport);
   renderBlueprint();
   resultHash.textContent = world.lastHash;
   copyRecordButton.disabled = completedReplay === null;
@@ -1633,6 +1710,8 @@ async function resumeBattle(): Promise<void> {
   completedReplay = null;
   copyRecordButton.disabled = true;
   replayCopyStatus.textContent = '中断から再開した試合は、再現記録を作りません。';
+  performanceMonitor.start();
+  resetPerformanceResult();
   viewportStable = true;
   pauseMessage = '中断した試合を読み込みました。表示が安定したら「再開する」を押してください。';
   machine.transition('paused');
@@ -1656,6 +1735,8 @@ async function startPractice(): Promise<void> {
   }
   practiceMode = true;
   practiceComplete = false;
+  performanceMonitor.reset();
+  resetPerformanceResult();
   tutorialState = createTutorialState();
   selectedLoadout = DEFAULT_TRAP_LOADOUT;
   selectedMap = DEFAULT_MAP_ID;
@@ -1680,11 +1761,14 @@ async function startPractice(): Promise<void> {
 function stopPractice(message = '練習を終了しました。'): void {
   if (!practiceMode) return;
   cancelAnimationFrame(frameId);
+  performanceMonitor.reset();
   inputController.deactivate();
   soundEngine.suspend();
   contextRecovery.endMatch();
   practiceMode = false;
   practiceComplete = false;
+  performanceMonitor.reset();
+  resetPerformanceResult();
   tutorialState = createTutorialState();
   world = null;
   resetBlueprintTelemetry(null);
@@ -1731,6 +1815,8 @@ async function startBattle(): Promise<void> {
   replayRecorder = new ReplayRecorder(world, { buildCommit: BUILD_COMMIT });
   copyRecordButton.disabled = true;
   replayCopyStatus.textContent = '';
+  performanceMonitor.start();
+  resetPerformanceResult();
   inputController.activate();
   machine.transition('battle');
   updateScreen();
@@ -1744,6 +1830,8 @@ async function startBattle(): Promise<void> {
 
 function returnToTitle(message = ''): void {
   cancelAnimationFrame(frameId);
+  performanceMonitor.reset();
+  resetPerformanceResult();
   cancelResumeCountdown();
   clearContextRecoveryTimer();
   contextRecovery.endMatch();
@@ -1810,6 +1898,7 @@ function bindEvents(): void {
   getElement<HTMLButtonElement>('restart-button').addEventListener('click', () => void startBattle());
   getElement<HTMLButtonElement>('result-title-button').addEventListener('click', () => returnToTitle());
   copyRecordButton.addEventListener('click', () => void copyMatchRecord());
+  copyPerformanceButton.addEventListener('click', () => void copyPerformanceReport());
 
   window.addEventListener('blur', () => {
     cancelResumeCountdown();

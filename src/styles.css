@@ -142,6 +142,11 @@ button:focus-visible { outline: 3px solid #ffd37a; outline-offset: 4px; }
 .hint { margin: 14px 0 0; font-size: .82rem; }
 .overlay-screen { text-align: center; }
 .result-details { display: grid; gap: 12px; margin-top: 18px; text-align: left; }
+.performance-section { display: grid; gap: 8px; margin-top: 18px; padding: 14px; border: 1px solid #5a4c78; border-radius: 14px; background: #211a37; text-align: left; }
+.performance-section h3 { margin: 0; color: #f7f1e7; font-size: .98rem; }
+.performance-summary { margin: 0; color: #cfc3df !important; font-size: .74rem; line-height: 1.55 !important; }
+.performance-section .secondary-button { margin-top: 2px; }
+.performance-copy-status { min-height: 1.3em; margin: 0; color: #cfc3df; font-size: .74rem; line-height: 1.45; }
 .result-reason { margin: 0; padding: 12px 14px; border: 1px solid #5a4c78; border-radius: 14px; color: #f7f1e7; background: #211a37; }
 .blueprint-section { display: grid; gap: 6px; margin-top: 18px; text-align: left; }
 .blueprint-section h3 { margin: 0; color: #f7f1e7; font-size: .98rem; }
