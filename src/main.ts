@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, RendererType } from 'pixi.js';
 import './styles.css';
+import { AsyncOperationGate } from './app/async-operation-gate.ts';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
 import { MatchPerformanceMonitor, type MatchPerformanceReport } from './app/performance.ts';
@@ -233,7 +234,12 @@ const inputController = new InputController(
 );
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
+const battlePreparationGate = new AsyncOperationGate();
 let contextRecoveryTimer: number | null = null;
+
+function isCurrentBattlePreparation(token: number): boolean {
+  return battlePreparationGate.isCurrent(token) && machine.state === 'battle';
+}
 
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -1529,6 +1535,11 @@ function beginResumeCountdown(): void {
 
 function pauseGame(message = '試合を停止しています。'): void {
   if (machine.state !== 'battle') return;
+  battlePreparationGate.invalidate();
+  if (!world) {
+    returnToTitle('試合の準備を中断しました。もう一度開始してください。');
+    return;
+  }
   cancelAnimationFrame(frameId);
   cancelResumeCountdown();
   inputController.deactivate();
@@ -1746,7 +1757,8 @@ function ensurePortraitBattleViewport(): boolean {
 }
 
 async function resumeBattle(): Promise<void> {
-  if (!resumeSnapshot || !ensurePortraitBattleViewport()) return;
+  if (machine.state !== 'title' || !resumeSnapshot || !ensurePortraitBattleViewport()) return;
+  const preparationToken = battlePreparationGate.begin();
   const snapshot = resumeSnapshot;
   selectedLoadout = normalizeTrapLoadout(snapshot.world.loadouts[0]);
   loadoutSlot2.value = selectedLoadout[1];
@@ -1774,9 +1786,9 @@ async function resumeBattle(): Promise<void> {
   updateScreen();
   status.textContent = '中断した試合を準備しています…';
   const ready = await ensurePixi();
-  if (!ready || resumeSnapshot !== snapshot) return;
+  if (!ready || resumeSnapshot !== snapshot || !isCurrentBattlePreparation(preparationToken)) return;
   if (!ensurePortraitBattleViewport()) {
-    soundEngine.suspend();
+    pauseGame(currentBattleOrientationMessage());
     return;
   }
 
@@ -1798,7 +1810,8 @@ function discardResume(): void {
 }
 
 async function startPractice(): Promise<void> {
-  if (!ensurePortraitBattleViewport()) return;
+  if (machine.state !== 'title' || !ensurePortraitBattleViewport()) return;
+  const preparationToken = battlePreparationGate.begin();
   practiceMode = true;
   practiceComplete = false;
   performanceMonitor.reset();
@@ -1808,10 +1821,11 @@ async function startPractice(): Promise<void> {
   updateScreen();
   status.textContent = '練習の舞台を準備しています…';
   const ready = await ensurePixi();
-  if (!ready) return;
+  if (!ready || !isCurrentBattlePreparation(preparationToken)) return;
   const soundReady = await soundEngine.resume();
+  if (!isCurrentBattlePreparation(preparationToken)) return;
   if (!ensurePortraitBattleViewport()) {
-    soundEngine.suspend();
+    returnToTitle(currentBattleOrientationMessage());
     return;
   }
   selectedLoadout = DEFAULT_TRAP_LOADOUT;
@@ -1862,7 +1876,8 @@ async function startMatchFromPractice(): Promise<void> {
 }
 
 async function startBattle(): Promise<void> {
-  if (!ensurePortraitBattleViewport()) return;
+  if ((machine.state !== 'title' && machine.state !== 'result') || !ensurePortraitBattleViewport()) return;
+  const preparationToken = battlePreparationGate.begin();
   practiceMode = false;
   practiceComplete = false;
   tutorialState = createTutorialState();
@@ -1873,10 +1888,17 @@ async function startBattle(): Promise<void> {
   machine.transition('battle');
   updateScreen();
   status.textContent = '舞台を準備しています…';
+  world = null;
+  resetBlueprintTelemetry(null);
+  summaryRecordedWorld = null;
+  replayRecorder = null;
+  completedReplay = null;
   const soundReady = await soundEngine.resume();
+  if (!isCurrentBattlePreparation(preparationToken)) return;
   const ready = await ensurePixi();
+  if (!isCurrentBattlePreparation(preparationToken)) return;
   if (!ensurePortraitBattleViewport()) {
-    soundEngine.suspend();
+    returnToTitle(currentBattleOrientationMessage());
     return;
   }
   if (!ready) {
@@ -1908,6 +1930,7 @@ async function startBattle(): Promise<void> {
 }
 
 function returnToTitle(message = ''): void {
+  battlePreparationGate.invalidate();
   cancelAnimationFrame(frameId);
   performanceMonitor.reset();
   resetPerformanceResult();
