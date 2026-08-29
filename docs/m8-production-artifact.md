@@ -4,4 +4,4 @@ CIは `npm run check` で一度だけ `dist/` を作り、その直後に `npm r
 
 検査では、公開先 `/wanawana/` とContent Security Policy（CSP）metaを確認する。HTMLが参照するCSS・JavaScriptと、Vite manifestに列挙された `assets/` を実際に読み、参照切れを失敗にする。1.0ではService Workerを登録・同梱しない。
 
-この検査はブラウザの実機性能やタップ操作を代替しない。公開前には、iPhone縦持ちでタイトル、練習、戦闘、停止、復帰、結果、再戦の流れを確認する。
+この検査はブラウザの実機性能やタップ操作を代替しない。公開前には、iPhone縦持ちでタイトル、練習、戦闘、停止、復帰、結果、再戦の流れを確認する。WebGLを使えない環境ではCanvas描画へ切り替わり、同じ流れを続けられることも確認する。

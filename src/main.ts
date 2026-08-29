@@ -1,8 +1,9 @@
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, RendererType } from 'pixi.js';
 import './styles.css';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
 import { MatchPerformanceMonitor, type MatchPerformanceReport } from './app/performance.ts';
+import { rendererPreferences, type RendererPreference } from './app/renderer-support.ts';
 import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
 import { battleOrientationMessage, isPortraitBattleOrientation } from './app/orientation.ts';
 import {
@@ -161,6 +162,7 @@ const resumeButton = getElement<HTMLButtonElement>('resume-button');
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
 let pixiApp: Application | null = null;
+let rendererBackend: RendererPreference | null = null;
 
 interface ArenaRenderState {
   readonly mapId: MapId;
@@ -549,6 +551,22 @@ function webglAvailable(): boolean {
   }
 }
 
+function canvas2dAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    return Boolean(canvas.getContext('2d'));
+  } catch {
+    return false;
+  }
+}
+
+function transitionToUnsupported(): void {
+  if (machine.state === 'unsupported') return;
+  if (machine.state !== 'title') returnToTitle();
+  machine.transition('unsupported');
+  updateScreen();
+}
+
 function reducedMotionPreferred(): boolean {
   return typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -692,35 +710,58 @@ async function ensurePixi(): Promise<boolean> {
     applyRendererSettings();
     return true;
   }
-  if (!webglAvailable()) {
-    machine.transition('unsupported');
-    updateScreen();
+  if (!canvas2dAvailable()) {
+    transitionToUnsupported();
     return false;
   }
 
-  try {
+  const preferences = rendererPreferences(webglAvailable());
+  const initialize = async (preference: RendererPreference[]): Promise<Application | null> => {
     const app = new Application();
-    await app.init({
-      autoStart: false,
-      sharedTicker: false,
-      preference: 'webgl',
-      resizeTo: arena,
-      backgroundColor: 0x0f0d1b,
-      antialias: true,
-      resolution: desiredRendererResolution(),
-      preserveDrawingBuffer: false,
-    });
-    arena.replaceChildren(app.canvas);
-    (app.canvas as HTMLCanvasElement).addEventListener('webglcontextlost', handleWebglContextLost);
-    (app.canvas as HTMLCanvasElement).addEventListener('webglcontextrestored', handleWebglContextRestored);
-    pixiApp = app;
-    drawWorld();
-    return true;
-  } catch {
-    machine.transition('unsupported');
-    updateScreen();
-    return false;
+    try {
+      await app.init({
+        autoStart: false,
+        sharedTicker: false,
+        preference,
+        resizeTo: arena,
+        backgroundColor: 0x0f0d1b,
+        antialias: true,
+        resolution: desiredRendererResolution(),
+        preserveDrawingBuffer: false,
+      });
+      arena.replaceChildren(app.canvas);
+      pixiApp = app;
+      rendererBackend = app.renderer.type === RendererType.WEBGL ? 'webgl' : 'canvas';
+      if (rendererBackend === 'webgl') {
+        (app.canvas as HTMLCanvasElement).addEventListener('webglcontextlost', handleWebglContextLost);
+        (app.canvas as HTMLCanvasElement).addEventListener('webglcontextrestored', handleWebglContextRestored);
+      }
+      drawWorld();
+      return app;
+    } catch {
+      if (pixiApp === app) pixiApp = null;
+      rendererBackend = null;
+      arenaRenderState = null;
+      try {
+        app.destroy(true, true);
+      } catch {
+        // The renderer may have failed before it could be destroyed.
+      }
+      arena.replaceChildren();
+      return null;
+    }
+  };
+
+  const app = await initialize(preferences);
+  if (app) return true;
+
+  if (preferences[0] === 'webgl') {
+    const canvasApp = await initialize(['canvas']);
+    if (canvasApp) return true;
   }
+
+  transitionToUnsupported();
+  return false;
 }
 
 function readInput(): InputCommand {
@@ -1589,7 +1630,8 @@ function renderPerformanceReport(report: MatchPerformanceReport): void {
     ? '入力→次回描画は未計測'
     : '入力→次回描画' + report.inputSamples + '件：P95 '
       + formatPerformanceMs(report.inputP95Ms) + ' / 最大 ' + formatPerformanceMs(report.inputMaxMs);
-  resultPerformance.textContent = `この試合の簡易計測（rAF基準・${lightweightDisplay ? '軽量表示' : '通常表示'}）。` + frameSummary + '。'
+  const rendererSummary = rendererBackend === 'canvas' ? 'Canvas表示' : 'WebGL表示';
+  resultPerformance.textContent = `この試合の簡易計測（${rendererSummary}・rAF基準・${lightweightDisplay ? '軽量表示' : '通常表示'}）。` + frameSummary + '。'
     + inputSummary + '。数値は実機確認用の目安です。';
   copyPerformanceButton.disabled = report.frameSamples === 0 && report.inputSamples === 0;
   performanceCopyStatus.textContent = '';
@@ -1609,6 +1651,7 @@ async function copyPerformanceReport(): Promise<void> {
       height: arena.clientHeight,
       devicePixelRatio: window.devicePixelRatio || 1,
       renderResolution: desiredRendererResolution(),
+      renderer: rendererBackend ?? 'unknown',
     },
     settings: {
       difficulty: cpuDifficulty,
@@ -1715,6 +1758,21 @@ async function resumeBattle(): Promise<void> {
   updateLoadoutLabel();
   updateMapLabel();
   persistMatchSettings();
+  practiceMode = false;
+  practiceComplete = false;
+  contextRecovery.startMatch();
+  world = snapshot.world;
+  resetBlueprintTelemetry(world);
+  summaryRecordedWorld = null;
+  replayRecorder = null;
+  completedReplay = null;
+  copyRecordButton.disabled = true;
+  replayCopyStatus.textContent = '中断から再開した試合は、再現記録を作りません。';
+  performanceMonitor.start();
+  resetPerformanceResult();
+  machine.transition('battle');
+  updateScreen();
+  status.textContent = '中断した試合を準備しています…';
   const ready = await ensurePixi();
   if (!ready || resumeSnapshot !== snapshot) return;
   if (!ensurePortraitBattleViewport()) {
@@ -1727,16 +1785,6 @@ async function resumeBattle(): Promise<void> {
   inputController.reset();
   inputController.deactivate();
   soundEngine.suspend();
-  contextRecovery.startMatch();
-  world = snapshot.world;
-  resetBlueprintTelemetry(world);
-  summaryRecordedWorld = null;
-  replayRecorder = null;
-  completedReplay = null;
-  copyRecordButton.disabled = true;
-  replayCopyStatus.textContent = '中断から再開した試合は、再現記録を作りません。';
-  performanceMonitor.start();
-  resetPerformanceResult();
   viewportStable = true;
   pauseMessage = '中断した試合を読み込みました。表示が安定したら「再開する」を押してください。';
   machine.transition('paused');
@@ -1751,6 +1799,14 @@ function discardResume(): void {
 
 async function startPractice(): Promise<void> {
   if (!ensurePortraitBattleViewport()) return;
+  practiceMode = true;
+  practiceComplete = false;
+  performanceMonitor.reset();
+  resetPerformanceResult();
+  tutorialState = createTutorialState();
+  machine.transition('battle');
+  updateScreen();
+  status.textContent = '練習の舞台を準備しています…';
   const ready = await ensurePixi();
   if (!ready) return;
   const soundReady = await soundEngine.resume();
@@ -1758,11 +1814,6 @@ async function startPractice(): Promise<void> {
     soundEngine.suspend();
     return;
   }
-  practiceMode = true;
-  practiceComplete = false;
-  performanceMonitor.reset();
-  resetPerformanceResult();
-  tutorialState = createTutorialState();
   selectedLoadout = DEFAULT_TRAP_LOADOUT;
   selectedMap = DEFAULT_MAP_ID;
   inputController.setTrapLoadout(selectedLoadout);
@@ -1773,7 +1824,6 @@ async function startPractice(): Promise<void> {
   replayRecorder = null;
   completedReplay = null;
   inputController.activate();
-  machine.transition('battle');
   updateScreen();
   updateHud();
   applyRendererSettings();
@@ -1820,6 +1870,9 @@ async function startBattle(): Promise<void> {
   updateLoadoutLabel();
   updateMapLabel();
   persistMatchSettings();
+  machine.transition('battle');
+  updateScreen();
+  status.textContent = '舞台を準備しています…';
   const soundReady = await soundEngine.resume();
   const ready = await ensurePixi();
   if (!ensurePortraitBattleViewport()) {
@@ -1844,7 +1897,6 @@ async function startBattle(): Promise<void> {
   performanceMonitor.start();
   resetPerformanceResult();
   inputController.activate();
-  machine.transition('battle');
   updateScreen();
   updateHud();
   applyRendererSettings();
@@ -1971,8 +2023,9 @@ updateDifficultyLabel();
 updateLoadoutLabel();
 updateMapLabel();
 updateCareerSummary();
-status.textContent = webglAvailable() ? '準備完了' : 'WebGLを確認できません';
-if (!webglAvailable()) {
-  machine.transition('unsupported');
-  updateScreen();
+if (canvas2dAvailable()) {
+  status.textContent = '準備完了';
+} else {
+  status.textContent = '描画を確認できません';
+  transitionToUnsupported();
 }
