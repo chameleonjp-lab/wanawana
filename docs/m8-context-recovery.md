@@ -2,6 +2,8 @@
 
 PixiJSのWebGL描画領域を失ったとき、戦闘規則の時計を進めず、入力と音を止める。復旧しただけでは試合へ戻らず、利用者が「再開する」を押した後にだけ固定tickを再開する。
 
+起動時はWebGLを優先し、WebGLを開始できない場合はPixiJSのCanvas描画へ切り替える。Canvas描画ではWebGL描画領域の喪失を監視しない。WebGLとCanvasのどちらも開始できない場合だけ、対応外画面を表示する。
+
 ## 状態の境界
 
 - `webglcontextlost` を受けたら `preventDefault()` を呼び、現在の試合を一時停止する。

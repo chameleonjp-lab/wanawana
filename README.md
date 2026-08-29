@@ -18,7 +18,7 @@ npm run check
 npm run verify:dist
 ```
 
-GitHub Pages向けの公開先は `/wanawana/` です。1.0では、WebGLを表示できない端末へ対応外の案内を表示します。PixiJSのCanvas描画へ自動切替することは前提にしません。
+GitHub Pages向けの公開先は `/wanawana/` です。描画はWebGLを優先し、WebGLを開始できない端末ではPixiJSの2次元Canvas描画へ自動切替します。どちらも開始できない場合だけ、対応外の案内を表示します。
 
 公開用のActionsは `dist/` を一度だけ作り、検査済みのPages artifactをそのまま公開します。設定の境界は [`docs/m8-pages-deploy.md`](docs/m8-pages-deploy.md) に記録しています。
 
