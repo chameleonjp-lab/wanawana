@@ -109,10 +109,12 @@ describe('trap rendering', () => {
     drawTrap(arming, baseTrap({ armingTicks: 12 }));
     expect(arming.calls.some((call) => call.startsWith('moveTo:'))).toBe(true);
 
+    const own = createGraphics();
+    drawTrap(own, baseTrap());
     const enemy = createGraphics();
     drawTrap(enemy, baseTrap({ owner: 1, discovered: true }));
     expect(enemy.calls.filter((call) => call.startsWith('moveTo:')).length)
-      .toBeGreaterThan(arming.calls.filter((call) => call.startsWith('moveTo:')).length - 1);
+      .toBeGreaterThan(own.calls.filter((call) => call.startsWith('moveTo:')).length);
 
     const bomb = createGraphics();
     drawTrap(bomb, baseTrap({ kind: 'bomb', color: 0xff9b54, triggerTicks: 20 }));
