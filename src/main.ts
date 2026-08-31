@@ -4,6 +4,7 @@ import { AsyncOperationGate } from './app/async-operation-gate.ts';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
 import { drawActor, facingFromDelta, type ActorAction } from './app/actor-render.ts';
+import { drawTrap, drawTrapEvent, drawTrapPreview } from './app/trap-render.ts';
 import { MatchPerformanceMonitor, type MatchPerformanceReport } from './app/performance.ts';
 import { rendererPreferences, type RendererPreference } from './app/renderer-support.ts';
 import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
@@ -1085,35 +1086,33 @@ function drawWorld(): void {
   );
   let dynamicIndex = 0;
 
+  const trapMotionScale = reducedMotionPreferred() ? 0 : lightweightDisplay ? 0.5 : 1;
+  const trapSize = pixelsPerCell * 0.84;
   for (const trap of world.traps) {
-    if (trap.owner === 1 && !trap.discoveredBy[0]) continue;
+    const discovered = trap.owner === 0 || trap.discoveredBy[0];
+    if (!discovered) continue;
     const x = offsetX + cellToPixels(cellCenterUnits(trap.cellX), pixelsPerCell);
     const y = offsetY + cellToPixels(cellCenterUnits(trap.cellY), pixelsPerCell);
-    const color = trapColor(trap.kind);
     const marker = acquireDynamicGraphic(state, dynamicIndex);
     dynamicIndex += 1;
-    const alpha = trap.armingTicks > 0 ? 0.45 : 0.9;
-    marker.roundRect(
-      x - pixelsPerCell * 0.28,
-      y - pixelsPerCell * 0.28,
-      pixelsPerCell * 0.56,
-      pixelsPerCell * 0.56,
-      pixelsPerCell * 0.12,
-    )
-      .fill({ color, alpha })
-      .stroke({ color: 0xffffff, alpha: 0.7, width: 1.5 });
-    if (trap.kind === 'bomb' && (trap.triggerTicks ?? 0) > 0) {
-      const fuse = acquireDynamicGraphic(state, dynamicIndex);
-      dynamicIndex += 1;
-      fuse.circle(x, y, pixelsPerCell * 0.38)
-        .stroke({ color: 0xff9b54, alpha: 0.95, width: 2 });
-    }
-    if (trap.kind === 'moya' && (trap.effectTicks ?? 0) > 0) {
-      const gas = acquireDynamicGraphic(state, dynamicIndex);
-      dynamicIndex += 1;
-      gas.circle(x, y, cellToPixels(MOYA_RADIUS_UNITS, pixelsPerCell))
-        .stroke({ color: 0x9ad7a5, alpha: 0.34, width: 2 });
-    }
+    drawTrap(marker, {
+      x,
+      y,
+      size: trapSize,
+      kind: trap.kind,
+      direction: trap.direction,
+      owner: trap.owner,
+      discovered,
+      color: trapColor(trap.kind),
+      tick: world.tick,
+      armingTicks: trap.armingTicks,
+      remainingTicks: trap.remainingTicks,
+      triggerTicks: trap.triggerTicks,
+      effectTicks: trap.effectTicks,
+      effectRadius: cellToPixels(MOYA_RADIUS_UNITS, pixelsPerCell),
+      motionScale: trapMotionScale,
+      alpha: trap.owner === 0 ? 1 : 0.82,
+    });
   }
 
   const player = world.players[0];
@@ -1129,26 +1128,22 @@ function drawWorld(): void {
   const previewCellX = player.placement?.cellX ?? inputController.previewCell?.cellX ?? snapToCell(player.x, ARENA_WIDTH_CELLS);
   const previewCellY = player.placement?.cellY ?? inputController.previewCell?.cellY ?? snapToCell(player.y, ARENA_HEIGHT_CELLS);
   if (inputController.previewTrap || player.placement) {
+    const previewKind = player.placement?.kind ?? inputController.previewTrap ?? 'bounce';
     const previewDirection = player.placement?.direction ?? inputController.previewDirection;
     const preview = acquireDynamicGraphic(state, dynamicIndex);
     dynamicIndex += 1;
     const previewX = offsetX + cellToPixels(cellCenterUnits(previewCellX), pixelsPerCell);
     const previewY = offsetY + cellToPixels(cellCenterUnits(previewCellY), pixelsPerCell);
-    preview.roundRect(
-      previewX - pixelsPerCell * 0.38,
-      previewY - pixelsPerCell * 0.38,
-      pixelsPerCell * 0.76,
-      pixelsPerCell * 0.76,
-      pixelsPerCell * 0.14,
-    )
-      .stroke({ color: 0xf2b8ff, alpha: 0.9, width: 2 });
-    const directionVectors = [[0, -1], [1, 0], [0, 1], [-1, 0]] as const;
-    const [directionX, directionY] = directionVectors[previewDirection];
-    const arrow = acquireDynamicGraphic(state, dynamicIndex);
-    dynamicIndex += 1;
-    arrow.moveTo(previewX, previewY)
-      .lineTo(previewX + directionX * pixelsPerCell * 0.34, previewY + directionY * pixelsPerCell * 0.34)
-      .stroke({ color: 0xffffff, alpha: 0.95, width: 3 });
+    drawTrapPreview(preview, {
+      x: previewX,
+      y: previewY,
+      size: trapSize,
+      kind: previewKind,
+      direction: previewDirection,
+      color: trapColor(previewKind),
+      tick: world.tick,
+      motionScale: trapMotionScale,
+    });
   }
 
   for (const event of world.events) {
@@ -1158,30 +1153,18 @@ function drawWorld(): void {
     const eventY = offsetY + cellToPixels(event.y, pixelsPerCell);
     const marker = acquireDynamicGraphic(state, dynamicIndex);
     dynamicIndex += 1;
-    const color = trapColor(event.kind);
-    const markerRadius = motion.showRays
-      ? Math.max(10, pixelsPerCell * (0.2 + age / 180))
-      : Math.max(10, pixelsPerCell * 0.28);
-    const markerAlpha = motion.showRays
-      ? Math.max(0.2, 1 - age / motion.eventMarkerTicks)
-      : 0.86;
-    marker.circle(eventX, eventY, markerRadius)
-      .stroke({ color, alpha: markerAlpha, width: 2 });
-    if (motion.showRays && age <= motion.burstTicks) {
-      const burst = acquireDynamicGraphic(state, dynamicIndex);
-      dynamicIndex += 1;
-      const burstAlpha = Math.max(0.08, 0.7 - age / 18);
-      const burstRadius = pixelsPerCell * (0.28 + age / 60);
-      burst.circle(eventX, eventY, burstRadius).stroke({ color, alpha: burstAlpha, width: 2 });
-      for (let ray = 0; ray < 4; ray += 1) {
-        const angle = ray * Math.PI / 2;
-        const startRadius = burstRadius * 1.25;
-        const endRadius = burstRadius * 1.8;
-        burst.moveTo(eventX + Math.cos(angle) * startRadius, eventY + Math.sin(angle) * startRadius)
-          .lineTo(eventX + Math.cos(angle) * endRadius, eventY + Math.sin(angle) * endRadius);
-      }
-      burst.stroke({ color, alpha: burstAlpha, width: 2 });
-    }
+    drawTrapEvent(marker, {
+      x: eventX,
+      y: eventY,
+      size: pixelsPerCell,
+      color: trapColor(event.kind),
+      age,
+      eventMarkerTicks: motion.eventMarkerTicks,
+      burstTicks: motion.burstTicks,
+      chainLength: event.chainLength,
+      showRays: motion.showRays,
+      motionScale: trapMotionScale,
+    });
   }
 
   const previousPositions = previousActorPositions;
