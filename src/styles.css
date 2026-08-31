@@ -188,4 +188,91 @@ code { color: #ffd37a; }
 }
 
 .pause-status { min-height: 3.5em; margin-bottom: 0; }
+
+.player-name-field,
+.result-sharing,
+.online-ranking {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid #5a4c78;
+  border-radius: 14px;
+  background: #211a37;
+  text-align: left;
+}
+
+.player-name-field label,
+.result-sharing h3,
+.online-ranking h3 {
+  color: #f7f1e7;
+  font-weight: 800;
+}
+
+.player-name-field input,
+.result-share-text {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #8f70ad;
+  border-radius: 10px;
+  padding: 10px;
+  color: #f7f1e7;
+  background: #161326;
+  font: inherit;
+}
+
+.result-share-text {
+  min-height: 7rem;
+  resize: vertical;
+  line-height: 1.5;
+  user-select: text;
+}
+
+.player-name-field p,
+.result-sharing h3,
+.online-ranking h3,
+.online-ranking ol,
+.online-ranking p {
+  margin: 0;
+}
+
+.platform-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.platform-actions .secondary-button {
+  width: auto;
+  flex: 1 1 12rem;
+  margin-top: 0;
+}
+
+.platform-link {
+  color: #ffd37a;
+  font-weight: 800;
+}
+
+.result-player,
+.analysis-score {
+  margin: 12px 0 0 !important;
+  color: #ffd37a !important;
+  font-weight: 800;
+}
+
+.online-ranking ol {
+  display: grid;
+  gap: 5px;
+  padding-left: 1.5rem;
+  color: #ddd4e8;
+  line-height: 1.5;
+}
+
+.online-ranking-status,
+.result-platform-link {
+  display: block;
+  margin-top: 14px;
+}
 .primary-button:disabled { cursor: wait; opacity: .68; }

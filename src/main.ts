@@ -90,6 +90,11 @@ const FRAME_MS = 1_000 / 60;
 const MAX_TICKS_PER_FRAME = 5;
 const MAX_BACKLOG_TICKS = 8;
 const CONTEXT_RECOVERY_TIMEOUT_MS = 5_000;
+const SUPABASE_URL = 'https://mlpnjgezrnhdxsxolyzj.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_drzcy0v97knU6FgjqSgBHw_0A9XPdFM';
+const GAME_SLUG = 'wanawana';
+const CLIENT_VERSION = 'wanawana-2026-08-31';
+const LAB_URL = 'https://chameleonjp-lab.github.io/chameleonjp_lab/';
 const RESUME_STORAGE_KEY = 'wanawana:v1:resume';
 const TUTORIAL_STORAGE_KEY = 'wanawana:v1:tutorial';
 const RESUME_SAVE_INTERVAL_TICKS = 2 * TICK_RATE;
@@ -110,6 +115,12 @@ const cpuHp = getElement<HTMLElement>('cpu-hp');
 const gearValue = getElement<HTMLElement>('gear-value');
 const tickValue = getElement<HTMLElement>('tick-value');
 const resultSummary = getElement<HTMLElement>('result-summary');
+const resultPlayer = getElement<HTMLElement>('result-player');
+const resultShareText = getElement<HTMLTextAreaElement>('result-share-text');
+const resultShareButton = getElement<HTMLButtonElement>('result-share-button');
+const resultShareStatus = getElement<HTMLElement>('result-share-status');
+const onlineRankingList = getElement<HTMLOListElement>('online-ranking-list');
+const onlineRankingStatus = getElement<HTMLElement>('online-ranking-status');
 const resultDetails = getElement<HTMLElement>('result-details');
 const blueprintNote = getElement<HTMLElement>('blueprint-note');
 const resultBlueprint = getElement<HTMLElement>('result-blueprint');
@@ -141,6 +152,11 @@ const lightweightToggle = getElement<HTMLInputElement>('lightweight-toggle');
 const resetSettingsButton = getElement<HTMLButtonElement>('reset-settings');
 const practiceEntryNote = getElement<HTMLElement>('practice-entry-note');
 const practiceButton = getElement<HTMLButtonElement>('practice-button');
+const startButton = getElement<HTMLButtonElement>('start-button');
+const playerNameInput = getElement<HTMLInputElement>('player-name');
+const playerNameNote = getElement<HTMLElement>('player-name-note');
+const homeShareButton = getElement<HTMLButtonElement>('home-share-button');
+const homeShareStatus = getElement<HTMLElement>('home-share-status');
 const tutorialCard = getElement<HTMLElement>('tutorial-card');
 const tutorialHeading = getElement<HTMLElement>('tutorial-heading');
 const tutorialInstruction = getElement<HTMLElement>('tutorial-instruction');
@@ -163,6 +179,9 @@ const resumeButton = getElement<HTMLButtonElement>('resume-button');
 
 const SUMMARY_STORAGE_KEY = 'wanawana:v1:summary';
 const BUILD_COMMIT = import.meta.env.VITE_BUILD_COMMIT ?? 'local';
+document.querySelectorAll<HTMLAnchorElement>('.platform-link').forEach((link) => {
+  link.href = LAB_URL;
+});
 let pixiApp: Application | null = null;
 let rendererBackend: RendererPreference | null = null;
 
@@ -243,6 +262,117 @@ const inputController = new InputController(
 const soundEngine = new SoundEngine();
 const contextRecovery = new ContextRecovery();
 const battlePreparationGate = new AsyncOperationGate();
+
+interface RankingRow {
+  readonly rank_no?: number;
+  readonly display_name?: string;
+  readonly player_name?: string;
+  readonly score?: number;
+  readonly best_score?: number;
+}
+
+function loadPlayerName(): string {
+  try {
+    return (window.localStorage.getItem('wanawana-player-name') ?? '').trim().slice(0, 20);
+  } catch {
+    return '';
+  }
+}
+
+function savePlayerName(value: string): void {
+  try {
+    window.localStorage.setItem('wanawana-player-name', value);
+  } catch {
+    // Private browsing may disable storage; the current session still works.
+  }
+}
+
+let playerName = loadPlayerName();
+
+function currentGameUrl(): string {
+  return window.location.href.split('#')[0] ?? window.location.href;
+}
+
+function homeShareMessage(): string {
+  return `ワナワナ｜見えない罠を仕掛けて連鎖させる1対1ゲーム\n${currentGameUrl()}\n#カメレオンJP #ワナワナ`;
+}
+
+function scoreForRanking(report: MatchReport): number {
+  const player = report.players[0];
+  const resultBonus = report.result === 'player-win' ? 50 : report.result === 'draw' || report.result === 'time-draw' ? 25 : 0;
+  return Math.max(0, player.hp) + player.trapsDisarmed * 20 + report.maxChain * 10 + resultBonus;
+}
+
+function resultShareMessage(report: MatchReport, score: number): string {
+  const player = report.players[0];
+  return `ワナワナの結果：${report.resultLabel}\n仕掛けスコア ${score}点／残り体力 ${player.hp}\n最大連鎖 ${report.maxChain}段・解除 ${player.trapsDisarmed}回\n${currentGameUrl()}\n#カメレオンJP #ワナワナ`;
+}
+
+async function shareOrCopy(message: string): Promise<'shared' | 'copied' | 'manual'> {
+  try {
+    if (typeof navigator.share === 'function') {
+      await navigator.share({ title: 'ワナワナ', text: message });
+      return 'shared';
+    }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return 'manual';
+  }
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+    await navigator.clipboard.writeText(message);
+    return 'copied';
+  } catch {
+    return 'manual';
+  }
+}
+
+async function callRankingRpc<T>(name: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_PUBLISHABLE_KEY,
+      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error('ranking request failed');
+  return data as T;
+}
+
+async function submitAndLoadRanking(report: MatchReport): Promise<void> {
+  const score = scoreForRanking(report);
+  onlineRankingStatus.textContent = 'ランキング送信中…';
+  try {
+    await callRankingRpc('submit_score', {
+      p_display_name: playerName,
+      p_game_slug: GAME_SLUG,
+      p_score: score,
+      p_client_version: CLIENT_VERSION,
+    });
+    const rows = await callRankingRpc<RankingRow[]>('get_best_score_ranking', {
+      p_game_slug: GAME_SLUG,
+      p_limit: 10,
+    });
+    onlineRankingList.replaceChildren();
+    const safeRows = Array.isArray(rows) ? rows.slice(0, 10) : [];
+    if (safeRows.length === 0) {
+      const item = document.createElement('li');
+      item.textContent = 'まだ記録がありません。';
+      onlineRankingList.append(item);
+    } else {
+      safeRows.forEach((row, index) => {
+        const item = document.createElement('li');
+        item.textContent = `${row.rank_no ?? index + 1}位　${row.display_name ?? row.player_name ?? 'ななし'}　${Number(row.score ?? row.best_score ?? 0)}点`;
+        onlineRankingList.append(item);
+      });
+    }
+    onlineRankingStatus.textContent = 'ランキングを更新しました。';
+  } catch {
+    onlineRankingStatus.textContent = 'ランキングを取得できませんでした。ゲーム結果は保存されています。';
+  }
+}
 let contextRecoveryTimer: number | null = null;
 
 function isCurrentBattlePreparation(token: number): boolean {
@@ -275,7 +405,14 @@ function updateScreen(): void {
   if (state === 'paused') pauseStatus.textContent = pauseMessage;
   updateTrapButtons();
   updateTutorialCard();
-  practiceButton.disabled = state !== 'title';
+  playerNameInput.value = playerName;
+  playerNameNote.textContent = playerName.length > 0
+    ? `${playerName}さんの名前でランキングに参加します。`
+    : '名前を入力するとゲームを開始できます。';
+  const canStartNamedGame = playerName.length > 0;
+  practiceButton.disabled = state !== 'title' || !canStartNamedGame;
+  startButton.disabled = state !== 'title' || !canStartNamedGame;
+  resumeMatchButton.disabled = !canStartNamedGame;
   pauseButton.disabled = practiceMode && practiceComplete;
   updateResumePanel();
 }
@@ -1655,6 +1792,16 @@ function renderResultDetails(): void {
   resultDetails.append(list);
 }
 
+function renderResultSharing(report: MatchReport): void {
+  const score = scoreForRanking(report);
+  resultPlayer.textContent = `プレイヤー：${playerName || 'ななし'}`;
+  resultShareText.value = resultShareMessage(report, score);
+  resultShareStatus.textContent = '';
+  onlineRankingList.replaceChildren();
+  onlineRankingStatus.textContent = 'ランキング送信中…';
+  void submitAndLoadRanking(report);
+}
+
 
 function formatPerformanceMs(value: number | null): string {
   return value === null ? '—' : value.toFixed(1) + 'ms';
@@ -1747,6 +1894,7 @@ function finishBattle(): void {
   replayRecorder = null;
   recordFinishedMatch(report);
   resultSummary.textContent = `${report.resultLabel}。${world.tick}tickで試合を終えました。`;
+  renderResultSharing(report);
   renderResultDetails();
   completedPerformanceReport = performanceReport;
   renderPerformanceReport(performanceReport);
@@ -1796,6 +1944,11 @@ function ensurePortraitBattleViewport(): boolean {
 }
 
 async function resumeBattle(): Promise<void> {
+  if (!playerName) {
+    playerNameNote.textContent = 'プレイヤー名を入力してください。';
+    playerNameInput.focus();
+    return;
+  }
   if (machine.state !== 'title' || !resumeSnapshot || !ensurePortraitBattleViewport()) return;
   const preparationToken = battlePreparationGate.begin();
   const snapshot = resumeSnapshot;
@@ -1849,6 +2002,11 @@ function discardResume(): void {
 }
 
 async function startPractice(): Promise<void> {
+  if (!playerName) {
+    playerNameNote.textContent = 'プレイヤー名を入力してください。';
+    playerNameInput.focus();
+    return;
+  }
   if (machine.state !== 'title' || !ensurePortraitBattleViewport()) return;
   const preparationToken = battlePreparationGate.begin();
   practiceMode = true;
@@ -1915,6 +2073,11 @@ async function startMatchFromPractice(): Promise<void> {
 }
 
 async function startBattle(): Promise<void> {
+  if (!playerName) {
+    playerNameNote.textContent = 'プレイヤー名を入力してください。';
+    playerNameInput.focus();
+    return;
+  }
   if ((machine.state !== 'title' && machine.state !== 'result') || !ensurePortraitBattleViewport()) return;
   const preparationToken = battlePreparationGate.begin();
   practiceMode = false;
@@ -1996,7 +2159,30 @@ function returnToTitle(message = ''): void {
 }
 
 function bindEvents(): void {
-  getElement<HTMLButtonElement>('start-button').addEventListener('click', () => void startBattle());
+  playerNameInput.value = playerName;
+  playerNameInput.addEventListener('input', () => {
+    playerName = playerNameInput.value.trim().slice(0, 20);
+    playerNameInput.value = playerName;
+    savePlayerName(playerName);
+    updateScreen();
+  });
+  homeShareButton.addEventListener('click', async () => {
+    const outcome = await shareOrCopy(homeShareMessage());
+    homeShareStatus.textContent = outcome === 'shared'
+      ? '共有シートを開きました。'
+      : outcome === 'copied'
+        ? 'ゲームのリンクをコピーしました。'
+        : '自動共有できません。リンクを選択して共有してください。';
+  });
+  resultShareButton.addEventListener('click', async () => {
+    const outcome = await shareOrCopy(resultShareText.value);
+    resultShareStatus.textContent = outcome === 'shared'
+      ? '共有シートを開きました。'
+      : outcome === 'copied'
+        ? '結果文をコピーしました。'
+        : '自動共有できません。上の文章を選択してコピーしてください。';
+  });
+  startButton.addEventListener('click', () => void startBattle());
   practiceButton.addEventListener('click', () => void startPractice());
   getElement<HTMLButtonElement>('retry-button').addEventListener('click', () => {
     machine.transition('title');

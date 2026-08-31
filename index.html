@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#161326" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self' https://mlpnjgezrnhdxsxolyzj.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <title>ワナワナ — 仕掛け師の舞台</title>
   </head>
   <body>
@@ -21,6 +21,16 @@
           指で移動し、誘導弾で相手を罠へ押し込みます。罠札を押して足元を予告し、別の指で移動パッドを動かしてハネ板の方向を選び、離して設置。中央ボタンを押し続けると近くの敵罠を調査・解除できます。
         </p>
         <p id="settings-note" class="settings-note">難度・舞台・罠ロードアウト・軽量表示は、この端末に保存されます。</p>
+        <div class="player-name-field">
+          <label for="player-name">プレイヤー名（ランキング表示）</label>
+          <input id="player-name" type="text" maxlength="20" autocomplete="nickname" required placeholder="20文字以内で入力" />
+          <p id="player-name-note" class="settings-note">名前を入力するとゲームを開始できます。</p>
+        </div>
+        <div class="platform-actions">
+          <button id="home-share-button" class="secondary-button" type="button">このゲームをシェア</button>
+          <a class="platform-link" href="https://chameleonjp-lab.github.io/chameleonjp_lab/" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場</a>
+        </div>
+        <p id="home-share-status" class="settings-note" role="status" aria-live="polite"></p>
         <label class="performance-toggle">
           <input id="lightweight-toggle" type="checkbox" />
           <span>
@@ -188,6 +198,19 @@
         <p class="eyebrow">設計図リザルト（試作）</p>
         <h2 id="result-heading">試合を終えました</h2>
         <p id="result-summary">固定tickの試合が完了しました。</p>
+        <p id="result-player" class="result-player"></p>
+        <section class="result-sharing" aria-labelledby="result-share-heading">
+          <h3 id="result-share-heading">結果をシェア</h3>
+          <textarea id="result-share-text" rows="5" readonly></textarea>
+          <button id="result-share-button" class="secondary-button" type="button">結果をシェア／コピー</button>
+          <p id="result-share-status" class="settings-note" role="status" aria-live="polite"></p>
+        </section>
+        <section class="online-ranking" aria-labelledby="online-ranking-heading">
+          <h3 id="online-ranking-heading">上位10名</h3>
+          <ol id="online-ranking-list"></ol>
+          <p id="online-ranking-status" class="settings-note" role="status" aria-live="polite">結果を送信するとランキングを表示します。</p>
+        </section>
+        <a class="platform-link result-platform-link" href="https://chameleonjp-lab.github.io/chameleonjp_lab/" target="_blank" rel="noopener noreferrer">カメレオンJPの実験場へ</a>
         <div id="result-details" class="result-details" aria-live="polite"></div>
         <section class="performance-section" aria-labelledby="performance-heading">
           <h3 id="performance-heading">端末性能メモ</h3>
