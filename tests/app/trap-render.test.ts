@@ -18,27 +18,27 @@ function createGraphics(): FakeGraphics {
   graphics = {
     calls,
     circle(x, y, radius) {
-      calls.push(\`circle:\${x}:\${y}:\${radius}\`);
+      calls.push('circle:' + x + ':' + y + ':' + radius);
       return graphics;
     },
     roundRect(x, y, width, height, radius) {
-      calls.push(\`roundRect:\${x}:\${y}:\${width}:\${height}:\${radius}\`);
+      calls.push('roundRect:' + x + ':' + y + ':' + width + ':' + height + ':' + radius);
       return graphics;
     },
     moveTo(x, y) {
-      calls.push(\`moveTo:\${x}:\${y}\`);
+      calls.push('moveTo:' + x + ':' + y);
       return graphics;
     },
     lineTo(x, y) {
-      calls.push(\`lineTo:\${x}:\${y}\`);
+      calls.push('lineTo:' + x + ':' + y);
       return graphics;
     },
     fill(style) {
-      calls.push(\`fill:\${style.color}:\${style.alpha ?? 1}\`);
+      calls.push('fill:' + style.color + ':' + (style.alpha ?? 1));
       return graphics;
     },
     stroke(style) {
-      calls.push(\`stroke:\${style.color}:\${style.alpha ?? 1}:\${style.width ?? 0}\`);
+      calls.push('stroke:' + style.color + ':' + (style.alpha ?? 1) + ':' + (style.width ?? 0));
       return graphics;
     },
   };
