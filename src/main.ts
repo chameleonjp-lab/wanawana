@@ -3,6 +3,7 @@ import './styles.css';
 import { AsyncOperationGate } from './app/async-operation-gate.ts';
 import { ContextRecovery } from './app/context-recovery.ts';
 import { getMotionProfile } from './app/motion.ts';
+import { drawActor, facingFromDelta, type ActorAction } from './app/actor-render.ts';
 import { MatchPerformanceMonitor, type MatchPerformanceReport } from './app/performance.ts';
 import { rendererPreferences, type RendererPreference } from './app/renderer-support.ts';
 import { createViewportSize, viewportSizeChanged, type ViewportSize } from './app/viewport.ts';
@@ -219,6 +220,13 @@ interface TrapPlacementSample {
 
 let movementTrail: MovementSample[] = [];
 let trapPlacementSamples: TrapPlacementSample[] = [];
+
+interface ActorPositionSample {
+  readonly x: number;
+  readonly y: number;
+}
+
+let previousActorPositions: readonly [ActorPositionSample, ActorPositionSample] | null = null;
 let practiceMode = false;
 let practiceComplete = false;
 let tutorialState: TutorialState = createTutorialState();
@@ -1039,19 +1047,49 @@ function drawWorld(): void {
     }
   }
 
+  const previousPositions = previousActorPositions;
+  const currentPositions: [ActorPositionSample, ActorPositionSample] = [
+    { x: world.players[0].x, y: world.players[0].y },
+    { x: world.players[1].x, y: world.players[1].y },
+  ];
+  const actorMotionScale = reducedMotionPreferred() ? 0 : lightweightDisplay ? 0.5 : 1;
+
   for (const player of world.players) {
     const x = offsetX + cellToPixels(player.x, pixelsPerCell);
     const y = offsetY + cellToPixels(player.y, pixelsPerCell);
     const size = Math.max(18, pixelsPerCell * 0.64);
-    const color = player.id === 0 ? 0xffd37a : 0xd59aff;
+    const previous = previousPositions?.[player.id];
+    const deltaX = previous ? player.x - previous.x : 0;
+    const deltaY = previous ? player.y - previous.y : 0;
+    const moving = Boolean(previous && (Math.abs(deltaX) >= 1 || Math.abs(deltaY) >= 1));
+    const action: ActorAction = player.disabledTicks > 0
+      ? 'disabled'
+      : player.placement
+        ? 'placing'
+        : player.investigation
+          ? 'investigating'
+          : player.fireSlowTicks > 0
+            ? 'firing'
+            : moving ? 'moving' : 'idle';
     const token = acquireDynamicGraphic(state, dynamicIndex);
     dynamicIndex += 1;
-    const alpha = player.disabledTicks > 0 ? 0.35 : 1;
-    token.roundRect(x - size / 2, y - size / 2, size, size, size * 0.25)
-      .fill({ color, alpha });
-    token.roundRect(x - size / 2, y - size / 2, size, size, size * 0.25)
-      .stroke({ color: 0xffffff, alpha: 0.85, width: 2 });
+    drawActor(token, {
+      x,
+      y,
+      size,
+      color: player.id === 0 ? 0xffd37a : 0xd59aff,
+      outlineColor: 0xffffff,
+      accentColor: player.id === 0 ? 0x8cbdff : 0xff99c8,
+      id: player.id,
+      tick: world.tick,
+      facing: facingFromDelta(deltaX, deltaY, player.id === 0 ? 'up' : 'down'),
+      action,
+      motionScale: actorMotionScale,
+      alpha: player.disabledTicks > 0 ? 0.35 : 1,
+    });
   }
+
+  previousActorPositions = currentPositions;
 
   for (const shot of world.shots) {
     const x = offsetX + cellToPixels(shot.x, pixelsPerCell);
@@ -1206,6 +1244,7 @@ function trapDirectionName(direction: 0 | 1 | 2 | 3): string {
 }
 
 function resetBlueprintTelemetry(initialWorld: WorldState | null): void {
+  previousActorPositions = null;
   movementTrail = initialWorld
     ? [{ tick: initialWorld.tick, x: initialWorld.players[0].x, y: initialWorld.players[0].y }]
     : [];
