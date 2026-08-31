@@ -102,7 +102,6 @@ export function drawActor(graphics: Graphics, state: ActorVisualState): void {
   const stride = moving
     ? Math.sin((state.tick + state.id * 7) * 0.48) * state.size * 0.11 * motionScale
     : 0;
-  const facingSide = state.facing === 'left' ? -1 : state.facing === 'right' ? 1 : state.id === 0 ? 1 : -1;
 
   // The shadow stays still so the body movement remains easy to read.
   graphics.roundRect(
