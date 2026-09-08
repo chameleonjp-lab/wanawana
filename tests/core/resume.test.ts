@@ -75,6 +75,50 @@ describe('interrupted match resume records', () => {
     expect(readMatchResume(`${'x'.repeat(2_000_001)}`, 30_001)).toBeNull();
   });
 
+  it('rejects pre-audit physics snapshots before resuming their state', () => {
+    const saved = createMatchResume(createWorld(101), 'normal', 31_000);
+    const legacy = { ...saved, engineVersion: 'wanawana-resume-v4' };
+
+    // Keep all state and hashes valid to isolate the physics-version boundary.
+    expect(readMatchResume(JSON.stringify(legacy), 31_001)).toBeNull();
+    expect(readMatchResume(serializeMatchResume(saved), 31_001)).toEqual(saved);
+  });
+
+  it('resumes the result of simultaneous blasts without changing subsequent physics', () => {
+    const initial = createWorld(102, ['bounce', 'shock', 'bomb'], ['bounce', 'shock', 'bomb']);
+    let uninterrupted = advanceWorld({
+      ...initial,
+      players: [{ ...initial.players[0], x: 45_120 }, initial.players[1]],
+      traps: ([0, 1] as const).map((owner) => ({
+        id: owner + 2,
+        owner,
+        kind: 'bomb' as const,
+        direction: 0 as const,
+        cellX: owner + 3,
+        cellY: 6,
+        armingTicks: 0,
+        remainingTicks: 100,
+        triggerTicks: 1,
+        discoveredBy: [true, true] as const,
+      })),
+      nextEntityId: 4,
+    });
+    expect(uninterrupted.players[0].hp).toBe(60);
+    const saved = createMatchResume(uninterrupted, 'normal', 32_000);
+    const restored = readMatchResume(serializeMatchResume(saved), 32_001);
+    expect(restored).not.toBeNull();
+    if (!restored) return;
+
+    let resumed = restored.world;
+    for (let tick = 0; tick < 60; tick += 1) {
+      const input = { moveY: -1 as const, fire: tick === 12 };
+      uninterrupted = advanceWorld(uninterrupted, input);
+      resumed = advanceWorld(resumed, input);
+      expect(resumed.lastHash).toBe(uninterrupted.lastHash);
+    }
+    expect(resumed).toEqual(uninterrupted);
+  });
+
   it('rejects duplicate entities, dangling references, and future event parents', () => {
     const saved = createMatchResume(createWorld(100), 'normal', 40_000);
     const activeTrap = {

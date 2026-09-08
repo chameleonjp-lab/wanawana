@@ -57,6 +57,7 @@ export const RESPAWN_INVULNERABLE_TICKS = 30;
 export const MAX_CHAIN_TRAPS = 8;
 export const MAX_EVENTS_PER_TICK = 128;
 export const MAX_EVENT_LOG = 50_000;
+/** Retained for replay/config compatibility; swept collision does not probe a grid. */
 export const COLLISION_SEARCH_STEP_UNITS = 512;
 
 export const TRAP_COSTS: Readonly<Record<TrapKind, number>> = {
@@ -96,57 +97,429 @@ export function circleIntersectsObstacle(
   });
 }
 
-function moveAlongAxis(
+interface Rational {
+  readonly numerator: bigint;
+  readonly denominator: bigint;
+}
+
+interface SegmentParameterInterval {
+  readonly entry: Rational;
+  readonly exit: Rational;
+}
+
+const ZERO_RATIONAL: Rational = { numerator: 0n, denominator: 1n };
+const ONE_RATIONAL: Rational = { numerator: 1n, denominator: 1n };
+
+function rational(numerator: bigint, denominator: bigint): Rational {
+  if (denominator === 0n) throw new Error('A collision parameter cannot have a zero denominator.');
+  return denominator < 0n
+    ? { numerator: -numerator, denominator: -denominator }
+    : { numerator, denominator };
+}
+
+function compareRational(first: Rational, second: Rational): number {
+  const left = first.numerator * second.denominator;
+  const right = second.numerator * first.denominator;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function maxRational(first: Rational, second: Rational): Rational {
+  return compareRational(first, second) >= 0 ? first : second;
+}
+
+function minRational(first: Rational, second: Rational): Rational {
+  return compareRational(first, second) <= 0 ? first : second;
+}
+
+function clampRational(value: Rational, minimum: Rational, maximum: Rational): Rational {
+  return minRational(maximum, maxRational(minimum, value));
+}
+
+function integerSqrt(value: bigint): bigint {
+  if (value < 0n) throw new Error('The square root input must be non-negative.');
+  if (value < 2n) return value;
+
+  let low = 1n;
+  let high = 2n;
+  while (high * high <= value) high *= 2n;
+  while (high - low > 1n) {
+    const middle = (low + high) / 2n;
+    if (middle * middle <= value) low = middle;
+    else high = middle;
+  }
+  return low;
+}
+
+function ceilIntegerSquareRoot(value: bigint): bigint {
+  const floor = integerSqrt(value);
+  return floor * floor === value ? floor : floor + 1n;
+}
+
+/**
+ * Intersect a parametric segment S + D*t, 0 <= t <= 1, with an AABB.
+ * The bounds are rational so no floating point time or tie-break is involved.
+ */
+function segmentIntersectsRectangle(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
+  left: number,
+  right: number,
+  top: number,
+  bottom: number,
+): SegmentParameterInterval | null {
+  let entry = ZERO_RATIONAL;
+  let exit = ONE_RATIONAL;
+  const axes: readonly [number, number, number, number][] = [
+    [startX, deltaX, left, right],
+    [startY, deltaY, top, bottom],
+  ];
+
+  for (const [start, delta, minimum, maximum] of axes) {
+    if (delta === 0) {
+      if (start < minimum || start > maximum) return null;
+      continue;
+    }
+
+    const first = rational(BigInt(minimum - start), BigInt(delta));
+    const second = rational(BigInt(maximum - start), BigInt(delta));
+    entry = maxRational(entry, minRational(first, second));
+    exit = minRational(exit, maxRational(first, second));
+    if (compareRational(entry, exit) > 0) return null;
+  }
+
+  return { entry, exit };
+}
+
+/**
+ * Intersect a parametric segment with a circle. The circle's roots can be
+ * irrational; integer square-root bounds provide a deterministic lower bound
+ * for the first contact while preserving the integer state contract.
+ */
+function segmentIntersectsCircle(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
+  centerX: number,
+  centerY: number,
+  radius: number,
+): SegmentParameterInterval | null {
+  const endX = startX + deltaX;
+  const endY = startY + deltaY;
+  if (!segmentHitsCircle(startX, startY, endX, endY, centerX, centerY, radius)) return null;
+
+  const relativeX = BigInt(startX - centerX);
+  const relativeY = BigInt(startY - centerY);
+  const velocityX = BigInt(deltaX);
+  const velocityY = BigInt(deltaY);
+  const a = velocityX * velocityX + velocityY * velocityY;
+  const c = relativeX * relativeX + relativeY * relativeY - BigInt(radius) * BigInt(radius);
+  if (a === 0n) return { entry: ZERO_RATIONAL, exit: ONE_RATIONAL };
+  if (c <= 0n) {
+    // The caller handles a starting overlap/tangent separately. Returning a
+    // zero entry keeps this interval useful for a segment that starts on the
+    // boundary and immediately moves into the obstacle.
+    return { entry: ZERO_RATIONAL, exit: ONE_RATIONAL };
+  }
+
+  const b = 2n * (relativeX * velocityX + relativeY * velocityY);
+  const discriminant = b * b - 4n * a * c;
+  if (discriminant < 0n) return null;
+  const ceilRoot = ceilIntegerSquareRoot(discriminant);
+  const denominator = 2n * a;
+  // (-b - ceil(sqrt(disc))) / (2a) is no later than the exact first root.
+  const entryLowerBound = rational(-b - ceilRoot, denominator);
+  const exitUpperBound = rational(-b + ceilRoot, denominator);
+  if (compareRational(exitUpperBound, ZERO_RATIONAL) < 0
+    || compareRational(entryLowerBound, ONE_RATIONAL) > 0) return null;
+  return {
+    entry: clampRational(entryLowerBound, ZERO_RATIONAL, ONE_RATIONAL),
+    exit: clampRational(exitUpperBound, ZERO_RATIONAL, ONE_RATIONAL),
+  };
+}
+
+function obstacleFeatureIntervals(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
+  obstacle: ObstacleCell,
+  radius: number,
+): readonly SegmentParameterInterval[] {
+  const left = obstacle.cellX * CELL_UNITS;
+  const right = (obstacle.cellX + 1) * CELL_UNITS;
+  const top = obstacle.cellY * CELL_UNITS;
+  const bottom = (obstacle.cellY + 1) * CELL_UNITS;
+  const intervals: SegmentParameterInterval[] = [];
+
+  // The Minkowski sum of a rectangle and a circle is the union of its two
+  // expanded strips and four corner circles. Using this shape avoids the
+  // square-corner false positives of padding an AABB by the radius.
+  const horizontalStrip = segmentIntersectsRectangle(
+    startX,
+    startY,
+    deltaX,
+    deltaY,
+    left,
+    right,
+    top - radius,
+    bottom + radius,
+  );
+  if (horizontalStrip) intervals.push(horizontalStrip);
+
+  const verticalStrip = segmentIntersectsRectangle(
+    startX,
+    startY,
+    deltaX,
+    deltaY,
+    left - radius,
+    right + radius,
+    top,
+    bottom,
+  );
+  if (verticalStrip) intervals.push(verticalStrip);
+
+  for (const [centerX, centerY] of [
+    [left, top],
+    [right, top],
+    [left, bottom],
+    [right, bottom],
+  ] as const) {
+    const corner = segmentIntersectsCircle(
+      startX,
+      startY,
+      deltaX,
+      deltaY,
+      centerX,
+      centerY,
+      radius,
+    );
+    if (corner) intervals.push(corner);
+  }
+  return intervals;
+}
+
+function startsMovingIntoObstacle(
   x: number,
   y: number,
-  delta: number,
-  axis: 'x' | 'y',
+  deltaX: number,
+  deltaY: number,
+  obstacle: ObstacleCell,
+  radius: number,
+): boolean {
+  const left = obstacle.cellX * CELL_UNITS;
+  const right = (obstacle.cellX + 1) * CELL_UNITS;
+  const top = obstacle.cellY * CELL_UNITS;
+  const bottom = (obstacle.cellY + 1) * CELL_UNITS;
+  const nearestX = clampInteger(x, left, right);
+  const nearestY = clampInteger(y, top, bottom);
+  const offsetX = x - nearestX;
+  const offsetY = y - nearestY;
+  const distanceSquared = offsetX * offsetX + offsetY * offsetY;
+  const radiusSquared = radius * radius;
+
+  // A strictly overlapping state is invalid, so hold it in place rather than
+  // allowing one movement to emerge through a wall.
+  if (distanceSquared < radiusSquared) return true;
+  if (distanceSquared > radiusSquared) return false;
+
+  const directionDot = offsetX * deltaX + offsetY * deltaY;
+  if (directionDot < 0) return true;
+  if (directionDot > 0) return false;
+  // A tangent line does not enter the obstacle. It may stay in contact with a
+  // side while sliding, or leave a corner immediately; both are safe. The
+  // strict inward case was handled by directionDot < 0 above.
+  return false;
+}
+
+function firstContactForObstacle(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
+  obstacle: ObstacleCell,
+  radius: number,
+): Rational | null {
+  const startCollides = circleIntersectsObstacle(startX, startY, radius, [obstacle]);
+  if (startCollides) {
+    if (deltaX === 0 && deltaY === 0) return ZERO_RATIONAL;
+    // Permit a tangent player to move away from a boundary or slide alongside
+    // it. This avoids a permanent one-unit overlap/touch stack while still
+    // stopping movement that goes into a wall.
+    if (!startsMovingIntoObstacle(startX, startY, deltaX, deltaY, obstacle, radius)) return null;
+    return ZERO_RATIONAL;
+  }
+
+  let first: Rational | null = null;
+  for (const interval of obstacleFeatureIntervals(startX, startY, deltaX, deltaY, obstacle, radius)) {
+    if (compareRational(interval.exit, ZERO_RATIONAL) < 0
+      || compareRational(interval.entry, ONE_RATIONAL) > 0) continue;
+    const entry = clampRational(interval.entry, ZERO_RATIONAL, ONE_RATIONAL);
+    if (!first || compareRational(entry, first) < 0) first = entry;
+  }
+  return first;
+}
+
+function firstSweptContact(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
   obstacles: readonly ObstacleCell[],
-): number {
-  const start = axis === 'x' ? x : y;
-  const target = clampInteger(
-    start + delta,
-    axis === 'x' ? MIN_X : MIN_Y,
-    axis === 'x' ? MAX_X : MAX_Y,
-  );
-  if (delta === 0 || obstacles.length === 0) return target;
-
-  const positionAt = (distance: number): { x: number; y: number } => ({
-    x: axis === 'x' ? start + Math.sign(delta) * distance : x,
-    y: axis === 'y' ? start + Math.sign(delta) * distance : y,
-  });
-  const targetPosition = positionAt(Math.abs(target - start));
-  if (!circleIntersectsObstacle(targetPosition.x, targetPosition.y, PLAYER_RADIUS_UNITS, obstacles)) return target;
-
-  let safeDistance = 0;
-  const blockedDistance = Math.abs(target - start);
-  for (let probe = COLLISION_SEARCH_STEP_UNITS; probe < blockedDistance; probe += COLLISION_SEARCH_STEP_UNITS) {
-    const position = positionAt(probe);
-    if (circleIntersectsObstacle(position.x, position.y, PLAYER_RADIUS_UNITS, obstacles)) break;
-    safeDistance = probe;
+  radius: number,
+): Rational | null {
+  let first: Rational | null = null;
+  for (const obstacle of obstacles) {
+    const left = obstacle.cellX * CELL_UNITS - radius;
+    const right = (obstacle.cellX + 1) * CELL_UNITS + radius;
+    const top = obstacle.cellY * CELL_UNITS - radius;
+    const bottom = (obstacle.cellY + 1) * CELL_UNITS + radius;
+    // This is only a broad-phase exclusion. The actual test below still uses
+    // the rounded Minkowski shape, so a square expanded corner can never cause
+    // a collision by itself.
+    if (Math.max(startX, startX + deltaX) < left
+      || Math.min(startX, startX + deltaX) > right
+      || Math.max(startY, startY + deltaY) < top
+      || Math.min(startY, startY + deltaY) > bottom) continue;
+    const candidate = firstContactForObstacle(startX, startY, deltaX, deltaY, obstacle, radius);
+    if (candidate && (!first || compareRational(candidate, first) < 0)) first = candidate;
   }
+  return first;
+}
 
-  let low = safeDistance;
-  let high = blockedDistance;
-  for (let iteration = 0; iteration < 18 && high - low > 1; iteration += 1) {
-    const middle = Math.floor((low + high) / 2);
-    const position = positionAt(middle);
-    if (circleIntersectsObstacle(position.x, position.y, PLAYER_RADIUS_UNITS, obstacles)) high = middle;
-    else low = middle;
+function firstArenaBoundaryContact(
+  start: number,
+  delta: number,
+  minimum: number,
+  maximum: number,
+): Rational | null {
+  if (delta > 0 && start + delta >= maximum) return rational(BigInt(maximum - start), BigInt(delta));
+  if (delta < 0 && start + delta <= minimum) return rational(BigInt(minimum - start), BigInt(delta));
+  return null;
+}
+
+function earliestArenaBoundaryContact(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
+): Rational | null {
+  const candidates = [
+    firstArenaBoundaryContact(startX, deltaX, MIN_X, MAX_X),
+    firstArenaBoundaryContact(startY, deltaY, MIN_Y, MAX_Y),
+  ].filter((candidate): candidate is Rational => candidate !== null);
+  let first: Rational | null = null;
+  for (const candidate of candidates) {
+    if (compareRational(candidate, ZERO_RATIONAL) < 0
+      || compareRational(candidate, ONE_RATIONAL) > 0) continue;
+    if (!first || compareRational(candidate, first) < 0) first = candidate;
   }
-  const safePosition = positionAt(low);
-  return axis === 'x' ? safePosition.x : safePosition.y;
+  return first;
+}
+
+function ceilProgress(value: Rational, steps: number): number {
+  const product = value.numerator * BigInt(steps);
+  if (product >= 0n) return Number((product + value.denominator - 1n) / value.denominator);
+  return -Number((-product) / value.denominator);
+}
+
+function pointAtProgress(
+  startX: number,
+  startY: number,
+  deltaX: number,
+  deltaY: number,
+  progress: number,
+  steps: number,
+): { x: number; y: number } {
+  if (steps === 0) return { x: startX, y: startY };
+  return {
+    x: startX + Math.trunc(deltaX * progress / steps),
+    y: startY + Math.trunc(deltaY * progress / steps),
+  };
 }
 
 export function movePlayerWithObstacles(
   player: PlayerState,
-  deltaX: number,
-  deltaY: number,
+  deltaXInput: number,
+  deltaYInput: number,
   obstacles: readonly ObstacleCell[] = [],
 ): PlayerState {
-  const nextX = moveAlongAxis(player.x, player.y, deltaX, 'x', obstacles);
-  const nextY = moveAlongAxis(nextX, player.y, deltaY, 'y', obstacles);
-  return { ...player, x: nextX, y: nextY };
+  const startX = clampInteger(player.x, MIN_X, MAX_X);
+  const startY = clampInteger(player.y, MIN_Y, MAX_Y);
+  const deltaX = Number.isFinite(deltaXInput) ? Math.trunc(deltaXInput) : 0;
+  const deltaY = Number.isFinite(deltaYInput) ? Math.trunc(deltaYInput) : 0;
+  const targetX = clampInteger(startX + deltaX, MIN_X, MAX_X);
+  const targetY = clampInteger(startY + deltaY, MIN_Y, MAX_Y);
+  if (deltaX === 0 && deltaY === 0) {
+    return { ...player, x: targetX, y: targetY };
+  }
+
+  // Keep the requested segment intact until its first collision. Clamping X
+  // and Y independently before sweeping would silently turn a diagonal move
+  // into a different direction when only one axis reaches the arena edge.
+  const boundaryContact = earliestArenaBoundaryContact(startX, startY, deltaX, deltaY);
+  const contact = firstSweptContact(
+    startX,
+    startY,
+    deltaX,
+    deltaY,
+    obstacles,
+    PLAYER_RADIUS_UNITS,
+  );
+  const boundaryIsFirst = boundaryContact !== null
+    && (contact === null || compareRational(boundaryContact, contact) <= 0);
+  if (boundaryContact === null && contact === null) {
+    return { ...player, x: targetX, y: targetY };
+  }
+
+  // Contact itself is treated as occupied by circleIntersectsObstacle. Move
+  // to the last integer point before it, preserving one direct segment rather
+  // than resolving X and Y as an implicit L-shaped route.
+  const firstContact = boundaryIsFirst ? boundaryContact : contact;
+  if (!firstContact) return { ...player, x: targetX, y: targetY };
+  const steps = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+  let safeProgress = Math.max(
+    0,
+    Math.min(steps, ceilProgress(firstContact, steps) - (boundaryIsFirst ? 0 : 1)),
+  );
+  let safePoint = pointAtProgress(startX, startY, deltaX, deltaY, safeProgress, steps);
+  if (boundaryIsFirst) {
+    safePoint = {
+      x: clampInteger(safePoint.x, MIN_X, MAX_X),
+      y: clampInteger(safePoint.y, MIN_Y, MAX_Y),
+    };
+  }
+
+  // Integer interpolation can move a rounded corner by one unit relative to
+  // the continuous contact bound. Re-sweep the quantized segment and retreat
+  // until the entire stored segment is clear, rather than checking its end
+  // point only. This also covers diagonal corner grazing symmetrically.
+  while (
+    safeProgress > 0
+    && (
+      circleIntersectsObstacle(safePoint.x, safePoint.y, PLAYER_RADIUS_UNITS, obstacles)
+      || firstSweptContact(
+        startX,
+        startY,
+        safePoint.x - startX,
+        safePoint.y - startY,
+        obstacles,
+        PLAYER_RADIUS_UNITS,
+      ) !== null
+    )
+  ) {
+    safeProgress -= 1;
+    safePoint = pointAtProgress(startX, startY, deltaX, deltaY, safeProgress, steps);
+    if (boundaryIsFirst) {
+      safePoint = {
+        x: clampInteger(safePoint.x, MIN_X, MAX_X),
+        y: clampInteger(safePoint.y, MIN_Y, MAX_Y),
+      };
+    }
+  }
+  return { ...player, x: safePoint.x, y: safePoint.y };
 }
 
 export function applyMovement(
@@ -278,51 +651,6 @@ export function segmentHitsCircle(
   return left <= right;
 }
 
-function orientation(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  cx: number,
-  cy: number,
-): number {
-  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-}
-
-function pointOnSegment(
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  px: number,
-  py: number,
-): boolean {
-  return px >= Math.min(ax, bx) && px <= Math.max(ax, bx)
-    && py >= Math.min(ay, by) && py <= Math.max(ay, by);
-}
-
-function segmentsIntersect(
-  firstStartX: number,
-  firstStartY: number,
-  firstEndX: number,
-  firstEndY: number,
-  secondStartX: number,
-  secondStartY: number,
-  secondEndX: number,
-  secondEndY: number,
-): boolean {
-  const first = orientation(firstStartX, firstStartY, firstEndX, firstEndY, secondStartX, secondStartY);
-  const second = orientation(firstStartX, firstStartY, firstEndX, firstEndY, secondEndX, secondEndY);
-  const third = orientation(secondStartX, secondStartY, secondEndX, secondEndY, firstStartX, firstStartY);
-  const fourth = orientation(secondStartX, secondStartY, secondEndX, secondEndY, firstEndX, firstEndY);
-  if (((first > 0 && second < 0) || (first < 0 && second > 0))
-    && ((third > 0 && fourth < 0) || (third < 0 && fourth > 0))) return true;
-  if (first === 0 && pointOnSegment(firstStartX, firstStartY, firstEndX, firstEndY, secondStartX, secondStartY)) return true;
-  if (second === 0 && pointOnSegment(firstStartX, firstStartY, firstEndX, firstEndY, secondEndX, secondEndY)) return true;
-  if (third === 0 && pointOnSegment(secondStartX, secondStartY, secondEndX, secondEndY, firstStartX, firstStartY)) return true;
-  return fourth === 0 && pointOnSegment(secondStartX, secondStartY, secondEndX, secondEndY, firstEndX, firstEndY);
-}
-
 export function segmentHitsObstacle(
   startX: number,
   startY: number,
@@ -331,18 +659,19 @@ export function segmentHitsObstacle(
   obstacle: ObstacleCell,
   padding = 0,
 ): boolean {
-  const left = obstacle.cellX * CELL_UNITS - padding;
-  const right = (obstacle.cellX + 1) * CELL_UNITS + padding;
-  const top = obstacle.cellY * CELL_UNITS - padding;
-  const bottom = (obstacle.cellY + 1) * CELL_UNITS + padding;
-  if (Math.max(startX, endX) < left || Math.min(startX, endX) > right
-    || Math.max(startY, endY) < top || Math.min(startY, endY) > bottom) return false;
-  const inside = (x: number, y: number): boolean => x >= left && x <= right && y >= top && y <= bottom;
-  if (inside(startX, startY) || inside(endX, endY)) return true;
-  return segmentsIntersect(startX, startY, endX, endY, left, top, right, top)
-    || segmentsIntersect(startX, startY, endX, endY, right, top, right, bottom)
-    || segmentsIntersect(startX, startY, endX, endY, right, bottom, left, bottom)
-    || segmentsIntersect(startX, startY, endX, endY, left, bottom, left, top);
+  // Use the same rounded Minkowski obstacle as player movement. Padding a
+  // rectangle by the radius would incorrectly hit paths that only pass the
+  // square corner; this matters for diagonal shots and keeps every moving
+  // object on one collision contract.
+  const radius = Math.max(0, Math.trunc(padding));
+  return firstContactForObstacle(
+    startX,
+    startY,
+    endX - startX,
+    endY - startY,
+    obstacle,
+    radius,
+  ) !== null;
 }
 
 export function applyPush(

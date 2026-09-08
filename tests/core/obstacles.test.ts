@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { applyPush, cellCenterUnits, PLAYER_RADIUS_UNITS } from '../../src/core/fixed.ts';
+import {
+  applyPush,
+  BOUNCE_PUSH_UNITS,
+  cellCenterUnits,
+  movePlayerWithObstacles,
+  PLAYER_RADIUS_UNITS,
+} from '../../src/core/fixed.ts';
 import { getMapDefinition } from '../../src/core/maps.ts';
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 import { CELL_UNITS, type WorldState } from '../../src/core/types.ts';
@@ -9,6 +15,21 @@ const wallLeft = 4 * CELL_UNITS - PLAYER_RADIUS_UNITS;
 const wallCenterY = 4 * CELL_UNITS + CELL_UNITS / 2;
 
 describe('map obstacle collisions', () => {
+  it('stops a long push at the first wall even when its endpoint is clear', () => {
+    const base = createWorld(900);
+    const wall = { cellX: 4, cellY: 3 } as const;
+    const start = {
+      ...base.players[0],
+      x: cellCenterUnits(3),
+      y: cellCenterUnits(3),
+    };
+
+    const pushed = movePlayerWithObstacles(start, BOUNCE_PUSH_UNITS, 0, [wall]);
+
+    expect(pushed.x).toBe(4 * CELL_UNITS - PLAYER_RADIUS_UNITS - 1);
+    expect(pushed.y).toBe(start.y);
+  });
+
   it('stops a player at the first wall boundary', () => {
     const base = createWorld(901);
     let world: WorldState = {
