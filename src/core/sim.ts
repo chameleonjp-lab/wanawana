@@ -557,6 +557,11 @@ function trapContactRadius(trap: TrapState): number {
 }
 
 function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): ContactCandidate | null {
+  const candidates = findFirstContacts(segment, traps);
+  return candidates[0] ?? null;
+}
+
+function findFirstContacts(segment: TrapSegment, traps: readonly TrapState[]): ContactCandidate[] {
   const candidates: ContactCandidate[] = [];
   for (const trap of traps) {
     if (trap.armingTicks > 0 || (trap.triggerTicks ?? 0) > 0 || (trap.effectTicks ?? 0) > 0) continue;
@@ -575,7 +580,9 @@ function findFirstContact(segment: TrapSegment, traps: readonly TrapState[]): Co
     candidates.push({ trap, progress });
   }
   candidates.sort((first, second) => compareContactProgress(first.progress, second.progress) || first.trap.id - second.trap.id);
-  return candidates[0] ?? null;
+  const first = candidates[0];
+  if (!first) return [];
+  return candidates.filter((candidate) => compareContactProgress(candidate.progress, first.progress) === 0);
 }
 
 function moveByDirection(
@@ -602,6 +609,79 @@ function moveAwayFromTrap(
     return moveByDirection(player, dx < 0 ? 3 : 1, distance, obstacles);
   }
   return moveByDirection(player, dy < 0 ? 0 : 2, distance, obstacles);
+}
+
+interface PushVector {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Return the force a radial trap intends to apply before obstacle resolution.
+ *
+ * Trap effects are collected against one snapshot. Applying this vector only
+ * after the collection phase prevents one bomb's resolved position from
+ * changing another bomb's hit test. The strongest single displacement in the
+ * current rule set is a bounce, so combined force is capped at that distance.
+ */
+function intendedPushAwayFromTrap(player: PlayerState, trap: TrapState, distance: number): PushVector {
+  const dx = player.x - cellCenterUnits(trap.cellX);
+  const dy = player.y - cellCenterUnits(trap.cellY);
+  if (dx === 0 && dy === 0) return { x: 0, y: -distance };
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: dx < 0 ? -distance : distance, y: 0 };
+  return { x: 0, y: dy < 0 ? -distance : distance };
+}
+
+function intendedPushForTrap(player: PlayerState, trap: TrapState): PushVector {
+  if (trap.kind === 'bounce') {
+    const vectors = [[0, -BOUNCE_PUSH_UNITS], [BOUNCE_PUSH_UNITS, 0], [0, BOUNCE_PUSH_UNITS], [-BOUNCE_PUSH_UNITS, 0]] as const;
+    const [x, y] = vectors[trap.direction];
+    return { x, y };
+  }
+  return intendedPushAwayFromTrap(player, trap, SHOCK_PUSH_UNITS);
+}
+
+function integerSquareRoot(value: bigint): bigint {
+  if (value < 2n) return value;
+  let low = 1n;
+  let high = 2n;
+  while (high * high <= value) high *= 2n;
+  while (high - low > 1n) {
+    const middle = (low + high) / 2n;
+    if (middle * middle <= value) low = middle;
+    else high = middle;
+  }
+  return low;
+}
+
+function ceilIntegerSquareRoot(value: bigint): bigint {
+  const floor = integerSquareRoot(value);
+  return floor * floor === value ? floor : floor + 1n;
+}
+
+function capCombinedPush(push: PushVector): PushVector {
+  const magnitudeSquared = BigInt(push.x) * BigInt(push.x) + BigInt(push.y) * BigInt(push.y);
+  const limit = BigInt(BOUNCE_PUSH_UNITS);
+  if (magnitudeSquared === 0n || magnitudeSquared <= limit * limit) return push;
+  const magnitudeCeiling = ceilIntegerSquareRoot(magnitudeSquared);
+  return {
+    x: Number((BigInt(push.x) * limit) / magnitudeCeiling),
+    y: Number((BigInt(push.y) * limit) / magnitudeCeiling),
+  };
+}
+
+function applyCombinedPush(
+  player: PlayerState,
+  push: PushVector,
+  obstacles: readonly ObstacleCell[],
+): PlayerState {
+  if (push.x === 0 && push.y === 0) return player;
+  return movePlayerWithObstacles(
+    { ...player, placement: null, investigation: null },
+    push.x,
+    push.y,
+    obstacles,
+  );
 }
 
 interface TrapEffectResult {
@@ -661,25 +741,6 @@ function applyTrapEffect(
   return { player: nextPlayer, damage, pushX, pushY };
 }
 
-function closestPlayerInTrapContact(
-  players: readonly [PlayerState, PlayerState],
-  trap: TrapState,
-): 0 | 1 | null {
-  const centerX = cellCenterUnits(trap.cellX);
-  const centerY = cellCenterUnits(trap.cellY);
-  const radiusSquared = trapContactRadius(trap) ** 2;
-  const candidates = ([0, 1] as const)
-    .filter((id) => players[id].disabledTicks === 0)
-    .map((id) => {
-      const dx = players[id].x - centerX;
-      const dy = players[id].y - centerY;
-      return { id, distance: dx * dx + dy * dy };
-    })
-    .filter((candidate) => candidate.distance <= radiusSquared)
-    .sort((first, second) => first.distance - second.distance || first.id - second.id);
-  return candidates[0]?.id ?? null;
-}
-
 function resolveTrapContacts(
   tick: number,
   players: readonly [PlayerState, PlayerState],
@@ -720,109 +781,185 @@ function resolveTrapContacts(
   let chainId = nextChainId;
   let maxChain = currentMaxChain;
   let technicalInvalid = false;
+  const triggeredBombIds = new Set<number>();
 
-  for (let eventCount = 0; eventCount < MAX_EVENTS_PER_TICK; eventCount += 1) {
-    const candidates = segments.map((segment) => segment ? findFirstContact(segment, remainingTraps) : null);
-    let targetId: 0 | 1 | null = null;
-    let candidate: ContactCandidate | null = null;
-    for (const id of [0, 1] as const) {
-      const current = candidates[id];
-      if (!current) continue;
-      const progressOrder = candidate ? compareContactProgress(current.progress, candidate.progress) : -1;
-      if (!candidate || progressOrder < 0
-        || (progressOrder === 0 && (id < (targetId ?? 2)
-          || (id === targetId && current.trap.id < candidate.trap.id)))) {
-        targetId = id;
-        candidate = current;
-      }
+  for (let eventCount = 0; eventCount < MAX_EVENTS_PER_TICK && !technicalInvalid; eventCount += 1) {
+    const firstCandidates = segments.map((segment) => segment ? findFirstContacts(segment, remainingTraps) : []);
+    let earliest: ContactProgress | null = null;
+    for (const candidates of firstCandidates) {
+      const candidate = candidates[0];
+      if (!candidate) continue;
+      if (!earliest || compareContactProgress(candidate.progress, earliest) < 0) earliest = candidate.progress;
     }
-    if (!candidate || targetId === null) break;
+    if (!earliest) break;
 
-    const segment = segments[targetId];
-    if (!segment) break;
-    const trap = candidate.trap;
-    const parentEventId = segment.parentEventId;
-    const eventChainId = segment.chainId ?? chainId++;
-    const eventChainLength = segment.chainLength + 1;
-    const contactPoint = pointAtContact(segment, candidate.progress);
-    if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
-    maxChain = Math.max(maxChain, eventChainLength);
+    // Contacts with the same fixed-rational progress are one effect phase.
+    // Gather them before consuming a trap or moving either target, so an
+    // overlapping trap cannot be won by entity-array order.
+    const batches: Array<{
+      readonly targetId: 0 | 1;
+      readonly segment: TrapSegment;
+      readonly candidates: readonly ContactCandidate[];
+    }> = [];
+    for (const targetId of [0, 1] as const) {
+      const segment = segments[targetId];
+      const candidates = firstCandidates[targetId];
+      if (!segment || candidates.length === 0) continue;
+      if (compareContactProgress(candidates[0].progress, earliest) !== 0) continue;
+      batches.push({ targetId, segment, candidates });
+      segments[targetId] = null;
+    }
 
-    // Pon玉 is consumed by contact, but its event is intentionally delayed until
-    // the fuse expires. Store the chain context so replay never has to infer it.
-    if (trap.kind === 'bomb' && (trap.triggerTicks ?? 0) === 0) {
-      remainingTraps = remainingTraps.map((current) => current.id === trap.id
-        ? {
-          ...current,
-          triggerTicks: BOMB_TRIGGER_TICKS,
-          triggerParentEventId: parentEventId,
-          triggerChainId: eventChainId,
-          triggerChainLength: segment.chainLength,
-          triggerResponsibleActor: parentEventId === null
+    // A trap may be contacted by both players in the same phase. The trap is
+    // consumed once, while each target receives the effect from the shared
+    // snapshot. Contact batches are ordered by target then physical trap key;
+    // only event identifiers use this order, never hit resolution.
+    batches.sort((first, second) => first.targetId - second.targetId);
+    const consumedTrapIds = new Set<number>();
+    const activatedMoyaIds = new Set<number>();
+
+    for (const batch of batches) {
+      const { targetId, segment, candidates } = batch;
+      const contactPoint = pointAtContact(segment, candidates[0].progress);
+      const basePlayer = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
+      const protectedTarget = basePlayer.respawnInvulnerableTicks > 0;
+      let totalDamage = 0;
+      let push: PushVector = { x: 0, y: 0 };
+      let hasHatch = false;
+      let hasMoya = false;
+      let clearAction = false;
+      let representativeEvent: TrapEvent | null = null;
+
+      const orderedCandidates = [...candidates].sort((first, second) => first.trap.cellY - second.trap.cellY
+        || first.trap.cellX - second.trap.cellX
+        || first.trap.owner - second.trap.owner
+        || first.trap.kind.localeCompare(second.trap.kind)
+        || first.trap.id - second.trap.id);
+      // A legal placement cannot contain two traps from one owner on one
+      // cell. Keep that invariant for legacy/hand-authored states while
+      // allowing the intended enemy-on-enemy overlap to resolve together.
+      const ownerCells = new Set<string>();
+      for (const candidate of orderedCandidates) {
+        const trap = candidate.trap;
+        const ownerCell = `${trap.owner}:${trap.cellX}:${trap.cellY}`;
+        if (ownerCells.has(ownerCell)) continue;
+        ownerCells.add(ownerCell);
+        const parentEventId = segment.parentEventId;
+        const eventChainId = segment.chainId ?? chainId++;
+        const eventChainLength = segment.chainLength + 1;
+        if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
+        maxChain = Math.max(maxChain, eventChainLength);
+
+        if (trap.kind === 'bomb') {
+          if (!triggeredBombIds.has(trap.id)) {
+            triggeredBombIds.add(trap.id);
+            remainingTraps = remainingTraps.map((current) => current.id === trap.id
+              ? {
+                ...current,
+                triggerTicks: BOMB_TRIGGER_TICKS,
+                triggerParentEventId: parentEventId,
+                triggerChainId: eventChainId,
+                triggerChainLength: segment.chainLength,
+                triggerResponsibleActor: parentEventId === null
+                  ? segment.sourceActor
+                  : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor),
+              }
+              : current);
+          }
+          continue;
+        }
+
+        if (events.length >= MAX_EVENTS_PER_TICK) {
+          technicalInvalid = true;
+          break;
+        }
+        const activeMoya = trap.kind === 'moya' && (trap.effectTicks ?? 0) === 0;
+        if (activeMoya) {
+          if (!activatedMoyaIds.has(trap.id)) {
+            activatedMoyaIds.add(trap.id);
+            remainingTraps = remainingTraps.map((current) => current.id === trap.id
+              ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
+              : current);
+          }
+        } else if (!consumedTrapIds.has(trap.id)) {
+          consumedTrapIds.add(trap.id);
+          remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
+        }
+
+        const damage = !protectedTarget && (trap.kind === 'shock' || trap.kind === 'hatch')
+          ? trap.kind === 'shock' ? 18 : 26
+          : 0;
+        const contribution = !protectedTarget && (trap.kind === 'bounce' || trap.kind === 'shock')
+          ? intendedPushForTrap(basePlayer, trap)
+          : { x: 0, y: 0 };
+        totalDamage += damage;
+        push = { x: push.x + contribution.x, y: push.y + contribution.y };
+        if (trap.kind === 'hatch') hasHatch = !protectedTarget || hasHatch;
+        if (trap.kind === 'moya') hasMoya = true;
+        if (!protectedTarget || trap.kind === 'moya') clearAction = true;
+
+        const event: TrapEvent = {
+          id: eventId,
+          tick,
+          chainId: eventChainId,
+          parentEventId,
+          chainLength: eventChainLength,
+          trapId: trap.id,
+          owner: trap.owner,
+          kind: trap.kind,
+          target: targetId,
+          responsibleActor: parentEventId === null
             ? segment.sourceActor
             : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor),
+          x: contactPoint.x,
+          y: contactPoint.y,
+          damage,
+          pushX: contribution.x,
+          pushY: contribution.y,
+        };
+        eventId += 1;
+        events.push(event);
+        if (representativeEvent === null) representativeEvent = event;
+        if (eventChainLength > MAX_CHAIN_TRAPS || events.length >= MAX_EVENT_LOG) {
+          technicalInvalid = true;
+          break;
         }
-        : current);
-      nextPlayers[targetId] = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
-      segments[targetId] = null;
-      continue;
-    }
+      }
+      if (technicalInvalid) break;
 
-    // モヤびん remains as a field while active, but can only be triggered once.
-    const moyaActivation = trap.kind === 'moya' && (trap.effectTicks ?? 0) === 0;
-    if (moyaActivation) {
-      remainingTraps = remainingTraps.map((current) => current.id === trap.id
-        ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
-        : current);
-    } else {
-      remainingTraps = remainingTraps.filter((current) => current.id !== trap.id);
-    }
-
-    const currentPlayer = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
-    const responsibleActor = parentEventId === null ? segment.sourceActor : (events.find((event) => event.id === parentEventId)?.responsibleActor ?? segment.sourceActor);
-    const effect = applyTrapEffect(currentPlayer, trap, obstacles);
-    const nextPlayer = effect.player;
-    const { damage, pushX, pushY } = effect;
-
-    const event: TrapEvent = {
-      id: eventId,
-      tick,
-      chainId: eventChainId,
-      parentEventId,
-      chainLength: eventChainLength,
-      trapId: trap.id,
-      owner: trap.owner,
-      kind: trap.kind,
-      target: targetId,
-      responsibleActor,
-      x: contactPoint.x,
-      y: contactPoint.y,
-      damage,
-      pushX,
-      pushY,
-    };
-    eventId += 1;
-    events.push(event);
-    nextPlayers[targetId] = nextPlayer;
-
-    if (technicalInvalid || events.length >= MAX_EVENT_LOG) {
-      technicalInvalid = true;
-      break;
-    }
-
-    if (trap.kind === 'bounce' || trap.kind === 'shock') {
-      segments[targetId] = {
-        startX: currentPlayer.x,
-        startY: currentPlayer.y,
-        endX: nextPlayer.x,
-        endY: nextPlayer.y,
-        sourceActor: responsibleActor,
-        parentEventId: event.id,
-        chainId: event.chainId,
-        chainLength: event.chainLength,
-      };
-    } else {
-      segments[targetId] = null;
+      const damagedPlayer = totalDamage > 0
+        ? {
+          ...basePlayer,
+          hp: Math.max(0, basePlayer.hp - totalDamage),
+          placement: null,
+          investigation: null,
+        }
+        : clearAction
+          ? { ...basePlayer, placement: null, investigation: null }
+          : basePlayer;
+      const withHatch = hasHatch
+        ? { ...damagedPlayer, disabledTicks: HATCH_DISABLED_TICKS, placement: null, investigation: null }
+        : damagedPlayer;
+      if (hasMoya) {
+        remainingTraps = remainingTraps.map((current) => activatedMoyaIds.has(current.id)
+          ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
+          : current);
+      }
+      const cappedPush = capCombinedPush(push);
+      const nextPlayer = applyCombinedPush(withHatch, cappedPush, obstacles);
+      nextPlayers[targetId] = nextPlayer;
+      if (representativeEvent && (nextPlayer.x !== contactPoint.x || nextPlayer.y !== contactPoint.y)) {
+        segments[targetId] = {
+          startX: contactPoint.x,
+          startY: contactPoint.y,
+          endX: nextPlayer.x,
+          endY: nextPlayer.y,
+          sourceActor: representativeEvent.responsibleActor,
+          parentEventId: representativeEvent.id,
+          chainId: representativeEvent.chainId,
+          chainLength: representativeEvent.chainLength,
+        };
+      }
     }
   }
 
@@ -959,12 +1096,47 @@ function resolveDelayedTrapEffects(
     }
   };
 
+  /**
+   * Every due bomb observes this same player snapshot. We intentionally keep
+   * it separate from nextPlayers: applying the first blast must never alter a
+   * later blast's hit set for this tick.
+   */
+  const blastSnapshot: readonly [PlayerState, PlayerState] = [
+    { ...players[0] },
+    { ...players[1] },
+  ];
   const dueBombs = traps
     .filter((trap) => trap.kind === 'bomb' && (trap.triggerTicks ?? 0) === 1)
-    .sort((first, second) => first.id - second.id);
+    // Physical position is the primary key. IDs break ties only for truly
+    // indistinguishable entities; changing an ID cannot change a hit result.
+    .sort((first, second) => first.cellY - second.cellY
+      || first.cellX - second.cellX
+      || first.owner - second.owner
+      || first.direction - second.direction
+      || first.id - second.id);
+  const dueBombIds = new Set(dueBombs.map((bomb) => bomb.id));
+  remainingTraps = remainingTraps.filter((trap) => !dueBombIds.has(trap.id));
 
+  interface DueBombContext {
+    readonly bomb: TrapState;
+    readonly eventChainId: number;
+    readonly eventChainLength: number;
+    readonly parentEventId: number | null;
+    readonly responsibleActor: 0 | 1;
+    readonly explosionEventId: number;
+  }
+  interface BombImpact {
+    readonly bomb: TrapState;
+    readonly targetId: 0 | 1;
+    readonly inBlast: boolean;
+    readonly protectedTarget: boolean;
+    readonly push: PushVector;
+    readonly event: TrapEvent;
+  }
+
+  const dueContexts: DueBombContext[] = [];
+  const impacts: BombImpact[] = [];
   for (const bomb of dueBombs) {
-    remainingTraps = remainingTraps.filter((trap) => trap.id !== bomb.id);
     const centerX = cellCenterUnits(bomb.cellX);
     const centerY = cellCenterUnits(bomb.cellY);
     const eventChainId = bomb.triggerChainId ?? chainId++;
@@ -973,45 +1145,33 @@ function resolveDelayedTrapEffects(
     const responsibleActor = bomb.triggerResponsibleActor ?? bomb.owner;
     if (eventChainLength > MAX_CHAIN_TRAPS) technicalInvalid = true;
     maxChain = Math.max(maxChain, eventChainLength);
-    let explosionEventId: number | null = null;
 
     const distanceSquaredToCenter = (targetId: 0 | 1): number => {
-      const dx = nextPlayers[targetId].x - centerX;
-      const dy = nextPlayers[targetId].y - centerY;
+      const dx = blastSnapshot[targetId].x - centerX;
+      const dy = blastSnapshot[targetId].y - centerY;
       return dx * dx + dy * dy;
     };
     const blastTargets = ([0, 1] as const).filter(
       (targetId) => distanceSquaredToCenter(targetId) <= BOMB_RADIUS_UNITS * BOMB_RADIUS_UNITS,
     );
+    // Keep the existing event contract for a blast that hits nobody: an
+    // explosion still has one target record, but it carries no damage/push.
     const eventTargets: readonly (0 | 1)[] = blastTargets.length > 0
       ? blastTargets
-      : ([0, 1] as (0 | 1)[]).sort((first, second) => distanceSquaredToCenter(first) - distanceSquaredToCenter(second) || first - second).slice(0, 1);
+      : ([0, 1] as (0 | 1)[]).sort((first, second) => distanceSquaredToCenter(first)
+        - distanceSquaredToCenter(second) || first - second).slice(0, 1);
+    let explosionEventId: number | null = null;
 
     for (const targetId of eventTargets) {
-      const currentPlayer = nextPlayers[targetId];
       if (existingEventCount + events.length >= MAX_EVENTS_PER_TICK) {
         technicalInvalid = true;
         break;
       }
-
       const inBlast = blastTargets.includes(targetId);
-      const protectedTarget = currentPlayer.respawnInvulnerableTicks > 0;
-      let nextPlayer = currentPlayer;
-      let damage = 0;
-      let pushX = 0;
-      let pushY = 0;
-      if (inBlast && !protectedTarget) {
-        damage = BOMB_DAMAGE;
-        nextPlayer = moveAwayFromTrap({
-          ...currentPlayer,
-          hp: Math.max(0, currentPlayer.hp - damage),
-          placement: null,
-          investigation: null,
-        }, bomb, BOMB_PUSH_UNITS, obstacles);
-        pushX = nextPlayer.x - currentPlayer.x;
-        pushY = nextPlayer.y - currentPlayer.y;
-      }
-
+      const protectedTarget = blastSnapshot[targetId].respawnInvulnerableTicks > 0;
+      const push = inBlast && !protectedTarget
+        ? intendedPushAwayFromTrap(blastSnapshot[targetId], bomb, BOMB_PUSH_UNITS)
+        : { x: 0, y: 0 };
       const event: TrapEvent = {
         id: eventId,
         tick,
@@ -1025,121 +1185,122 @@ function resolveDelayedTrapEffects(
         responsibleActor,
         x: centerX,
         y: centerY,
-        damage,
-        pushX,
-        pushY,
+        damage: inBlast && !protectedTarget ? BOMB_DAMAGE : 0,
+        pushX: push.x,
+        pushY: push.y,
       };
       if (explosionEventId === null) explosionEventId = event.id;
       events.push(event);
       eventId += 1;
-      nextPlayers[targetId] = nextPlayer;
+      impacts.push({ bomb, targetId, inBlast, protectedTarget, push, event });
       if (eventChainLength > MAX_CHAIN_TRAPS || existingEventCount + events.length >= MAX_EVENT_LOG) {
         technicalInvalid = true;
         break;
       }
-
-      if (inBlast && (pushX !== 0 || pushY !== 0)) {
-        enqueueSegment(targetId, {
-          startX: currentPlayer.x,
-          startY: currentPlayer.y,
-          endX: nextPlayer.x,
-          endY: nextPlayer.y,
-          sourceActor: responsibleActor,
-          parentEventId: event.id,
-          chainId: event.chainId,
-          chainLength: event.chainLength,
-        });
-        resolvePendingSegments();
-      }
     }
-    if (!technicalInvalid && explosionEventId !== null) {
-      const chainRadiusSquared = BOMB_CHAIN_RADIUS_UNITS * BOMB_CHAIN_RADIUS_UNITS;
-      const primedBombs = remainingTraps.map((current) => {
-        if (current.kind !== 'bomb' || current.armingTicks > 0 || (current.triggerTicks ?? 0) > 0) return current;
-        const dx = cellCenterUnits(current.cellX) - centerX;
-        const dy = cellCenterUnits(current.cellY) - centerY;
-        if (dx * dx + dy * dy > chainRadiusSquared) return current;
-        return {
-          ...current,
-          triggerTicks: BOMB_TRIGGER_TICKS,
-          triggerParentEventId: explosionEventId,
-          triggerChainId: eventChainId,
-          triggerChainLength: eventChainLength,
-          triggerResponsibleActor: responsibleActor,
-        };
+    if (explosionEventId !== null) {
+      dueContexts.push({
+        bomb,
+        eventChainId,
+        eventChainLength,
+        parentEventId,
+        responsibleActor,
+        explosionEventId,
       });
-      remainingTraps = primedBombs;
-
-      const triggeredTraps = [...remainingTraps]
-        .filter((current) => {
-          if (current.kind === 'bomb' || current.armingTicks > 0 || (current.triggerTicks ?? 0) > 0 || (current.effectTicks ?? 0) > 0) return false;
-          const dx = cellCenterUnits(current.cellX) - centerX;
-          const dy = cellCenterUnits(current.cellY) - centerY;
-          return dx * dx + dy * dy <= chainRadiusSquared;
-        })
-        .sort((first, second) => first.id - second.id);
-      for (const triggeredTrap of triggeredTraps) {
-        if (!remainingTraps.some((current) => current.id === triggeredTrap.id)) continue;
-        const targetId = closestPlayerInTrapContact(nextPlayers, triggeredTrap);
-        if (targetId === null) continue;
-        const triggeredChainLength = eventChainLength + 1;
-        if (triggeredChainLength > MAX_CHAIN_TRAPS || existingEventCount + events.length >= MAX_EVENTS_PER_TICK) {
-          technicalInvalid = true;
-          break;
-        }
-
-        const currentPlayer = nextPlayers[targetId];
-        const effect = applyTrapEffect(currentPlayer, triggeredTrap, obstacles);
-        remainingTraps = triggeredTrap.kind === 'moya'
-          ? remainingTraps.map((current) => current.id === triggeredTrap.id
-            ? { ...current, effectTicks: MOYA_EFFECT_TICKS }
-            : current)
-          : remainingTraps.filter((current) => current.id !== triggeredTrap.id);
-        const triggeredEvent: TrapEvent = {
-          id: eventId,
-          tick,
-          chainId: eventChainId,
-          parentEventId: explosionEventId,
-          chainLength: triggeredChainLength,
-          trapId: triggeredTrap.id,
-          owner: triggeredTrap.owner,
-          kind: triggeredTrap.kind,
-          target: targetId,
-          responsibleActor,
-          x: cellCenterUnits(triggeredTrap.cellX),
-          y: cellCenterUnits(triggeredTrap.cellY),
-          damage: effect.damage,
-          pushX: effect.pushX,
-          pushY: effect.pushY,
-        };
-        events.push(triggeredEvent);
-        eventId += 1;
-        nextPlayers[targetId] = effect.player;
-        maxChain = Math.max(maxChain, triggeredChainLength);
-        if (existingEventCount + events.length >= MAX_EVENT_LOG) {
-          technicalInvalid = true;
-          break;
-        }
-
-        if ((triggeredTrap.kind === 'bounce' || triggeredTrap.kind === 'shock')
-          && (effect.pushX !== 0 || effect.pushY !== 0)) {
-          enqueueSegment(targetId, {
-            startX: currentPlayer.x,
-            startY: currentPlayer.y,
-            endX: effect.player.x,
-            endY: effect.player.y,
-            sourceActor: responsibleActor,
-            parentEventId: triggeredEvent.id,
-            chainId: triggeredEvent.chainId,
-            chainLength: triggeredEvent.chainLength,
-          });
-          resolvePendingSegments();
-        }
-      }
     }
     if (technicalInvalid) break;
   }
 
+  // Aggregate all due effects before changing either player's state. Damage
+  // adds normally; force is capped once and then resolved against obstacles in
+  // one movement call. This keeps coincident blasts commutative and prevents
+  // walls from being applied once per entity in array order.
+  const totalDamage: [number, number] = [0, 0];
+  const combinedPush: [PushVector, PushVector] = [{ x: 0, y: 0 }, { x: 0, y: 0 }];
+  for (const impact of impacts) {
+    if (!impact.inBlast || impact.protectedTarget) continue;
+    const targetId = impact.targetId;
+    totalDamage[targetId] += impact.event.damage;
+    combinedPush[targetId] = {
+      x: combinedPush[targetId].x + impact.push.x,
+      y: combinedPush[targetId].y + impact.push.y,
+    };
+  }
+  for (const targetId of [0, 1] as const) {
+    const snapshotPlayer = blastSnapshot[targetId];
+    const damagedPlayer = totalDamage[targetId] > 0
+      ? {
+        ...snapshotPlayer,
+        hp: Math.max(0, snapshotPlayer.hp - totalDamage[targetId]),
+        placement: null,
+        investigation: null,
+      }
+      : nextPlayers[targetId];
+    const cappedPush = capCombinedPush(combinedPush[targetId]);
+    const pushedPlayer = applyCombinedPush(damagedPlayer, cappedPush, obstacles);
+    nextPlayers[targetId] = pushedPlayer;
+
+    const representative = impacts.find((impact) => impact.targetId === targetId
+      && impact.inBlast && !impact.protectedTarget);
+    if (representative && (cappedPush.x !== 0 || cappedPush.y !== 0)) {
+      enqueueSegment(targetId, {
+        startX: snapshotPlayer.x,
+        startY: snapshotPlayer.y,
+        endX: pushedPlayer.x,
+        endY: pushedPlayer.y,
+        sourceActor: representative.event.responsibleActor,
+        parentEventId: representative.event.id,
+        chainId: representative.event.chainId,
+        chainLength: representative.event.chainLength,
+      });
+    }
+  }
+
+  // Prime all armed bombs from the same pre-chain set. If two explosions can
+  // prime one bomb, use the canonical physical source as its one parent;
+  // this is the event-level representation of a multi-parent simultaneous
+  // effect and is stable under trap array reordering/ID substitution.
+  const armableBombs = remainingTraps.filter((trap) => trap.kind === 'bomb'
+    && trap.armingTicks === 0 && (trap.triggerTicks ?? 0) === 0);
+  const primeParents = new Map<number, DueBombContext>();
+  const chainRadiusSquared = BOMB_CHAIN_RADIUS_UNITS * BOMB_CHAIN_RADIUS_UNITS;
+  for (const context of dueContexts) {
+    const centerX = cellCenterUnits(context.bomb.cellX);
+    const centerY = cellCenterUnits(context.bomb.cellY);
+    for (const candidate of armableBombs) {
+      const dx = cellCenterUnits(candidate.cellX) - centerX;
+      const dy = cellCenterUnits(candidate.cellY) - centerY;
+      if (dx * dx + dy * dy > chainRadiusSquared) continue;
+      const previous = primeParents.get(candidate.id);
+      if (!previous
+        || context.bomb.cellY < previous.bomb.cellY
+        || (context.bomb.cellY === previous.bomb.cellY && context.bomb.cellX < previous.bomb.cellX)
+        || (context.bomb.cellY === previous.bomb.cellY && context.bomb.cellX === previous.bomb.cellX
+          && context.bomb.id < previous.bomb.id)) {
+        primeParents.set(candidate.id, context);
+      }
+    }
+  }
+  if (!technicalInvalid) {
+    remainingTraps = remainingTraps.map((trap) => {
+      const parent = primeParents.get(trap.id);
+      if (!parent) return trap;
+      return {
+        ...trap,
+        triggerTicks: BOMB_TRIGGER_TICKS,
+        triggerParentEventId: parent.explosionEventId,
+        triggerChainId: parent.eventChainId,
+        triggerChainLength: parent.eventChainLength,
+        triggerResponsibleActor: parent.responsibleActor,
+      };
+    });
+  }
+
+  // Only now follow causal forced movement into the next contact. The
+  // segment starts at the shared snapshot and carries one representative
+  // parent for the event log; the physical displacement above includes every
+  // simultaneous force contribution.
+  resolvePendingSegments();
   if (existingEventCount + events.length >= MAX_EVENTS_PER_TICK) technicalInvalid = true;
 
   return {

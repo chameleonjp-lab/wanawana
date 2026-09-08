@@ -71,6 +71,25 @@ describe('deterministic match records', () => {
     expect(recorder.finish(invalidWorld)).toBeNull();
   });
 
+  it('does not replay the pre-audit physics rules with the new collision engine', () => {
+    const initial = createWorld(83);
+    const recorder = new ReplayRecorder(initial, { engineVersion: 'wanawana-sim-v4' });
+    const world = advanceWorld(initial, { moveX: 1 });
+    recorder.recordTick({ moveX: 1 }, {}, world);
+    const legacy = recorder.finish(world);
+    expect(legacy).not.toBeNull();
+    if (!legacy) return;
+
+    // Even valid current hashes cannot make an old physics contract compatible.
+    const parsed = readReplayRecord(serializeReplayRecord(legacy));
+    expect(parsed).not.toBeNull();
+    expect(verifyReplayRecord(parsed as MatchReplay)).toMatchObject({
+      valid: false,
+      mismatchTick: null,
+      reason: '実装版、調整値、または面の版が現在と一致しません。',
+    });
+  });
+
   it('rejects records that claim a result without a final hash or share a technical stop', () => {
     const initial = createWorld(82);
     const recorder = new ReplayRecorder(initial);
