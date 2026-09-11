@@ -93,6 +93,10 @@ describe('fixed simulation', () => {
 
   it('starts a trap preview, then consumes one gear only after setup completes', () => {
     let world = createWorld(12);
+    world = {
+      ...world,
+      players: [{ ...world.players[0], x: cellCenterUnits(5), y: cellCenterUnits(6) }, world.players[1]],
+    };
     world = advanceWorld(world, { placeTrap: 'bounce' });
     expect(world.players[0].placement?.kind).toBe('bounce');
     expect(world.players[0].gear).toBe(3);
@@ -105,7 +109,7 @@ describe('fixed simulation', () => {
     world = advanceWorld(world);
     expect(world.traps).toHaveLength(1);
     expect(world.traps[0].kind).toBe('bounce');
-    expect(world.traps[0].cellX).toBe(2);
+    expect(world.traps[0].cellX).toBe(5);
     expect(world.traps[0].cellY).toBe(6);
     expect(world.players[0].gear).toBe(2);
   });
@@ -149,6 +153,10 @@ describe('fixed simulation', () => {
 
   it('uses the declared gear cost and rejects a trap without enough gear', () => {
     let world = createWorld(121);
+    world = {
+      ...world,
+      players: [{ ...world.players[0], x: cellCenterUnits(5), y: cellCenterUnits(6) }, world.players[1]],
+    };
     world = advanceWorld(world, { placeTrap: 'shock' });
     for (let tick = 0; tick < TRAP_PLACEMENT_TICKS; tick += 1) {
       world = advanceWorld(world);
@@ -164,6 +172,10 @@ describe('fixed simulation', () => {
   it('enforces the selected three-trap loadout and hashes it into the match', () => {
     const defaultWorld = createWorld(124);
     let world = createWorld(124, ['bounce', 'bomb', 'moya']);
+    world = {
+      ...world,
+      players: [{ ...world.players[0], x: cellCenterUnits(5), y: cellCenterUnits(6) }, world.players[1]],
+    };
     expect(world.loadouts[0]).toEqual(['bounce', 'bomb', 'moya']);
     expect(world.lastHash).not.toBe(defaultWorld.lastHash);
 
@@ -199,6 +211,10 @@ describe('fixed simulation', () => {
 
   it('cancels installation when a projectile lands on the completing tick', () => {
     let world = createWorld(123);
+    world = {
+      ...world,
+      players: [{ ...world.players[0], x: cellCenterUnits(5), y: cellCenterUnits(6) }, world.players[1]],
+    };
     world = advanceWorld(world, { placeTrap: 'bounce' });
     for (let tick = 0; tick < TRAP_PLACEMENT_TICKS - 1; tick += 1) {
       world = advanceWorld(world);
@@ -238,7 +254,12 @@ describe('fixed simulation', () => {
       remainingTicks: 1_800,
       discoveredBy: [false, true],
     };
-    const world: WorldState = { ...base, traps: [enemyTrap], nextEntityId: 3 };
+    const world: WorldState = {
+      ...base,
+      players: [{ ...base.players[0], x: cellCenterUnits(5), y: cellCenterUnits(6) }, base.players[1]],
+      traps: [enemyTrap],
+      nextEntityId: 3,
+    };
     const next = advanceWorld(world, { placeTrap: 'shock' });
     expect(next.players[0].placement?.kind).toBe('shock');
   });

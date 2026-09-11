@@ -35,6 +35,7 @@ import {
   PLAYER_RADIUS_UNITS,
   PUSH_IMMUNITY_TICKS,
   RESPAWN_INVULNERABLE_TICKS,
+  SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS,
   segmentHitsCircle,
   segmentHitsObstacle,
   movePlayerWithObstacles,
@@ -130,6 +131,8 @@ interface PlayerStep {
   readonly player: PlayerState;
   readonly shot: ShotState | null;
   readonly completedPlacement: PlacementState | null;
+  /** The protection tick is consumed after all effects for this tick resolve. */
+  readonly respawnProtectionTick?: boolean;
 }
 
 function recoverGear(player: PlayerState): Pick<PlayerState, 'gear' | 'gearRecoveryTicks'> {
@@ -145,15 +148,40 @@ function placementCellIsValid(
   traps: readonly TrapState[],
   cellX: number,
   cellY: number,
+  mapId: MapId,
   obstacles: readonly ObstacleCell[],
 ): boolean {
   if (obstacles.some((obstacle) => obstacle.cellX === cellX && obstacle.cellY === cellY)) return false;
   if (traps.some((trap) => trap.owner === player.id && trap.cellX === cellX && trap.cellY === cellY)) return false;
   const trapX = cellCenterUnits(cellX);
   const trapY = cellCenterUnits(cellY);
+  const spawnRadiusSquared = SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS
+    * SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS;
+  for (const spawnId of [0, 1] as const) {
+    const [spawnCellX, spawnCellY] = spawnCellFor(mapId, spawnId);
+    const dx = trapX - cellCenterUnits(spawnCellX);
+    const dy = trapY - cellCenterUnits(spawnCellY);
+    if (dx * dx + dy * dy <= spawnRadiusSquared) return false;
+  }
   const horizontalOverlap = Math.abs(target.x - trapX) <= CELL_UNITS / 2 + PLAYER_RADIUS_UNITS;
   const verticalOverlap = Math.abs(target.y - trapY) <= CELL_UNITS / 2 + PLAYER_RADIUS_UNITS;
   return !(horizontalOverlap && verticalOverlap);
+}
+
+function currentCell(player: PlayerState): { cellX: number; cellY: number } {
+  return {
+    cellX: snapToCell(player.x, ARENA_WIDTH_CELLS),
+    cellY: snapToCell(player.y, ARENA_HEIGHT_CELLS),
+  };
+}
+
+function placementCommandMatchesCurrentCell(player: PlayerState, command: InputCommand): boolean {
+  const hasCellX = command.trapCellX !== undefined;
+  const hasCellY = command.trapCellY !== undefined;
+  if (hasCellX !== hasCellY) return false;
+  if (!hasCellX) return true;
+  const cell = currentCell(player);
+  return command.trapCellX === cell.cellX && command.trapCellY === cell.cellY;
 }
 
 function spawnPosition(id: 0 | 1, mapId: MapId): { x: number; y: number } {
@@ -195,6 +223,7 @@ function stepPlayer(
         ...position,
         placement: null,
         investigation: null,
+        gasSlowTicks: 0,
         respawnInvulnerableTicks: timers.disabledTicks === 0
           ? RESPAWN_INVULNERABLE_TICKS
           : timers.respawnInvulnerableTicks,
@@ -202,6 +231,42 @@ function stepPlayer(
       shot: null,
       completedPlacement: null,
     };
+  }
+
+  // The short post-respawn grace period is a complete action/effect lock. It
+  // is deliberately checked before movement, firing, placement, or
+  // investigation so every command source (human, CPU, and replay) follows
+  // the same state transition.
+  if (player.respawnInvulnerableTicks > 0) {
+    return {
+      player: {
+        ...player,
+        ...timers,
+        // Keep the current protection value visible to the effect phases. It
+        // is decremented only after those phases have observed this tick.
+        respawnInvulnerableTicks: player.respawnInvulnerableTicks,
+        placement: null,
+        investigation: null,
+        gasSlowTicks: 0,
+      },
+      shot: null,
+      completedPlacement: null,
+      respawnProtectionTick: true,
+    };
+  }
+
+  if (player.placement) {
+    const cell = currentCell(player);
+    if (cell.cellX !== player.placement.cellX || cell.cellY !== player.placement.cellY) {
+      // A preview is anchored to the cell captured at release. If an external
+      // force or a restored state moved the actor away, cancel without
+      // consuming gear or creating a trap at a surprising location.
+      return {
+        player: { ...player, ...timers, placement: null },
+        shot: null,
+        completedPlacement: null,
+      };
+    }
   }
 
   if (player.placement && command.investigate && command.investigateStart) {
@@ -235,18 +300,17 @@ function stepPlayer(
     command.placeTrap
     && isTrapKind(command.placeTrap)
     && allowedTraps.includes(command.placeTrap)
+    && placementCommandMatchesCurrentCell(player, command)
     && !player.investigation
     && player.gear >= TRAP_COSTS[command.placeTrap]
     && player.trapCooldownTicks === 0
     && traps.filter((trap) => trap.owner === player.id).length < MAX_ACTIVE_TRAPS
   ) {
-    const cellX = Number.isInteger(command.trapCellX)
-      ? Math.min(ARENA_WIDTH_CELLS - 1, Math.max(0, command.trapCellX as number))
-      : snapToCell(player.x, ARENA_WIDTH_CELLS);
-    const cellY = Number.isInteger(command.trapCellY)
-      ? Math.min(ARENA_HEIGHT_CELLS - 1, Math.max(0, command.trapCellY as number))
-      : snapToCell(player.y, ARENA_HEIGHT_CELLS);
-    if (placementCellIsValid(player, target, traps, cellX, cellY, obstacles)) {
+    // The core captures the cell from the actor, never from a client-provided
+    // destination. The optional command cell is only a preview proof and was
+    // checked above to cancel stale/remote commands.
+    const cell = currentCell(player);
+    if (placementCellIsValid(player, target, traps, cell.cellX, cell.cellY, mapId, obstacles)) {
       return {
         player: {
           ...player,
@@ -254,8 +318,8 @@ function stepPlayer(
           placement: {
             kind: command.placeTrap,
             direction: command.trapDirection,
-            cellX,
-            cellY,
+            cellX: cell.cellX,
+            cellY: cell.cellY,
             remainingTicks: TRAP_PLACEMENT_TICKS,
           },
         },
@@ -336,6 +400,11 @@ function trapIsActive(trap: TrapState): boolean {
   return (trap.triggerTicks ?? 0) > 0 || (trap.effectTicks ?? 0) > 0;
 }
 
+/** A disabled or freshly respawned actor is outside every gameplay effect. */
+function isPlayerProtected(player: PlayerState): boolean {
+  return player.disabledTicks > 0 || player.respawnInvulnerableTicks > 0;
+}
+
 function findInvestigationTarget(
   player: PlayerState,
   traps: readonly TrapState[],
@@ -380,6 +449,12 @@ function stepInvestigation(
   command: InputCommand,
   traps: readonly TrapState[],
 ): InvestigationStep {
+  // Investigation is a gameplay input too. Keep the protection contract at
+  // this phase as well as in stepPlayer, because investigation runs after
+  // movement/placement resolution in the same fixed tick.
+  if (isPlayerProtected(player)) {
+    return { player: { ...player, investigation: null }, traps, disarmed: false };
+  }
   if (player.placement) {
     return { player: { ...player, investigation: null }, traps, disarmed: false };
   }
@@ -696,7 +771,7 @@ function applyTrapEffect(
   trap: TrapState,
   obstacles: readonly ObstacleCell[],
 ): TrapEffectResult {
-  const protectedTarget = player.respawnInvulnerableTicks > 0;
+  const protectedTarget = isPlayerProtected(player);
   let nextPlayer = player;
   let damage = 0;
   let pushX = 0;
@@ -729,7 +804,7 @@ function applyTrapEffect(
     }
   }
 
-  if (trap.kind === 'moya') {
+  if (trap.kind === 'moya' && !protectedTarget) {
     nextPlayer = {
       ...nextPlayer,
       placement: null,
@@ -755,7 +830,7 @@ function resolveTrapContacts(
   const nextPlayers: [PlayerState, PlayerState] = [...players];
   let remainingTraps: readonly TrapState[] = traps;
   const segments: Array<TrapSegment | null> = [
-    players[0].disabledTicks > 0 ? null : {
+    isPlayerProtected(players[0]) ? null : {
       startX: previousPositions[0].x,
       startY: previousPositions[0].y,
       endX: players[0].x,
@@ -765,7 +840,7 @@ function resolveTrapContacts(
       chainId: null,
       chainLength: 0,
     },
-    players[1].disabledTicks > 0 ? null : {
+    isPlayerProtected(players[1]) ? null : {
       startX: previousPositions[1].x,
       startY: previousPositions[1].y,
       endX: players[1].x,
@@ -784,7 +859,11 @@ function resolveTrapContacts(
   const triggeredBombIds = new Set<number>();
 
   for (let eventCount = 0; eventCount < MAX_EVENTS_PER_TICK && !technicalInvalid; eventCount += 1) {
-    const firstCandidates = segments.map((segment) => segment ? findFirstContacts(segment, remainingTraps) : []);
+    const firstCandidates = segments.map((segment, targetId) => (
+      segment && !isPlayerProtected(nextPlayers[targetId])
+        ? findFirstContacts(segment, remainingTraps)
+        : []
+    ));
     let earliest: ContactProgress | null = null;
     for (const candidates of firstCandidates) {
       const candidate = candidates[0];
@@ -822,7 +901,7 @@ function resolveTrapContacts(
       const { targetId, segment, candidates } = batch;
       const contactPoint = pointAtContact(segment, candidates[0].progress);
       const basePlayer = { ...nextPlayers[targetId], x: contactPoint.x, y: contactPoint.y };
-      const protectedTarget = basePlayer.respawnInvulnerableTicks > 0;
+      const protectedTarget = isPlayerProtected(basePlayer);
       let totalDamage = 0;
       let push: PushVector = { x: 0, y: 0 };
       let hasHatch = false;
@@ -873,7 +952,9 @@ function resolveTrapContacts(
           technicalInvalid = true;
           break;
         }
-        const activeMoya = trap.kind === 'moya' && (trap.effectTicks ?? 0) === 0;
+        const activeMoya = trap.kind === 'moya'
+          && !protectedTarget
+          && (trap.effectTicks ?? 0) === 0;
         if (activeMoya) {
           if (!activatedMoyaIds.has(trap.id)) {
             activatedMoyaIds.add(trap.id);
@@ -895,8 +976,8 @@ function resolveTrapContacts(
         totalDamage += damage;
         push = { x: push.x + contribution.x, y: push.y + contribution.y };
         if (trap.kind === 'hatch') hasHatch = !protectedTarget || hasHatch;
-        if (trap.kind === 'moya') hasMoya = true;
-        if (!protectedTarget || trap.kind === 'moya') clearAction = true;
+        if (trap.kind === 'moya' && !protectedTarget) hasMoya = true;
+        if (!protectedTarget) clearAction = true;
 
         const event: TrapEvent = {
           id: eventId,
@@ -948,7 +1029,9 @@ function resolveTrapContacts(
       const cappedPush = capCombinedPush(push);
       const nextPlayer = applyCombinedPush(withHatch, cappedPush, obstacles);
       nextPlayers[targetId] = nextPlayer;
-      if (representativeEvent && (nextPlayer.x !== contactPoint.x || nextPlayer.y !== contactPoint.y)) {
+      if (representativeEvent
+        && !isPlayerProtected(nextPlayer)
+        && (nextPlayer.x !== contactPoint.x || nextPlayer.y !== contactPoint.y)) {
         segments[targetId] = {
           startX: contactPoint.x,
           startY: contactPoint.y,
@@ -1009,6 +1092,7 @@ function resolveDelayedTrapEffects(
       pendingSegments.sort((first, second) => first.order - second.order || first.targetId - second.targetId);
       const pending = pendingSegments.shift();
       if (!pending) break;
+      if (isPlayerProtected(nextPlayers[pending.targetId])) continue;
       const candidate = findFirstContact(pending.segment, remainingTraps);
       if (!candidate) continue;
 
@@ -1168,7 +1252,7 @@ function resolveDelayedTrapEffects(
         break;
       }
       const inBlast = blastTargets.includes(targetId);
-      const protectedTarget = blastSnapshot[targetId].respawnInvulnerableTicks > 0;
+      const protectedTarget = isPlayerProtected(blastSnapshot[targetId]);
       const push = inBlast && !protectedTarget
         ? intendedPushAwayFromTrap(blastSnapshot[targetId], bomb, BOMB_PUSH_UNITS)
         : { x: 0, y: 0 };
@@ -1242,7 +1326,8 @@ function resolveDelayedTrapEffects(
 
     const representative = impacts.find((impact) => impact.targetId === targetId
       && impact.inBlast && !impact.protectedTarget);
-    if (representative && (cappedPush.x !== 0 || cappedPush.y !== 0)) {
+    if (representative && !isPlayerProtected(snapshotPlayer)
+      && (cappedPush.x !== 0 || cappedPush.y !== 0)) {
       enqueueSegment(targetId, {
         startX: snapshotPlayer.x,
         startY: snapshotPlayer.y,
@@ -1350,7 +1435,7 @@ function stepShots(
     ))) continue;
     const targetId: 0 | 1 = shot.owner === 0 ? 1 : 0;
     const target = nextPlayers[targetId];
-    const hit = target.disabledTicks === 0
+    const hit = !isPlayerProtected(target)
       && segmentHitsCircle(shot.x, shot.y, nextX, nextY, target.x, target.y, PLAYER_RADIUS_UNITS + SHOT_RADIUS_UNITS);
     if (hit) {
       const pushed = target.pushImmunityTicks === 0 ? applyPush(target, shot.vx, shot.vy, obstacles) : target;
@@ -1381,6 +1466,7 @@ function stepShots(
 }
 
 function gasSlowTicksFor(player: PlayerState, traps: readonly TrapState[]): number {
+  if (isPlayerProtected(player)) return 0;
   let effectTicks = 0;
   for (const trap of traps) {
     if (trap.kind !== 'moya' || (trap.effectTicks ?? 0) <= 0) continue;
@@ -1391,6 +1477,15 @@ function gasSlowTicksFor(player: PlayerState, traps: readonly TrapState[]): numb
     }
   }
   return effectTicks;
+}
+
+function finishRespawnProtectionTick(player: PlayerState, consumed: boolean): PlayerState {
+  if (!consumed) return player;
+  return {
+    ...player,
+    respawnInvulnerableTicks: Math.max(0, player.respawnInvulnerableTicks - 1),
+    gasSlowTicks: 0,
+  };
 }
 
 function determineResult(
@@ -1537,9 +1632,11 @@ export function advanceWorld(
   const tickEvents = [...trapStep.events, ...delayedTrapStep.events];
   const events = [...world.events, ...tickEvents];
   const nextTraps = advanceTrapTimers(traps);
+  const finishedPlayer = finishRespawnProtectionTick(player, Boolean(playerStep.respawnProtectionTick));
+  const finishedCpu = finishRespawnProtectionTick(cpu, Boolean(cpuStep.respawnProtectionTick));
   const nextPlayers: readonly [PlayerState, PlayerState] = [
-    { ...player, gasSlowTicks: gasSlowTicksFor(player, nextTraps) },
-    { ...cpu, gasSlowTicks: gasSlowTicksFor(cpu, nextTraps) },
+    { ...finishedPlayer, gasSlowTicks: gasSlowTicksFor(finishedPlayer, nextTraps) },
+    { ...finishedCpu, gasSlowTicks: gasSlowTicksFor(finishedCpu, nextTraps) },
   ];
   const result = determineResult(
     nextTick,

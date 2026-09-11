@@ -90,6 +90,14 @@ export interface InputCommand {
   readonly fire: boolean;
   readonly placeTrap?: TrapKind;
   readonly trapDirection: TrapDirection;
+  /**
+   * The cell captured by the input layer while the trap card was held.
+   *
+   * These values are a confirmation of the local preview only. The core
+   * always derives the placement cell from the actor's current position and
+   * rejects a command when the captured cell no longer matches it. In
+   * particular, they are never a remote destination for CPU commands.
+   */
   readonly trapCellX?: number;
   readonly trapCellY?: number;
   readonly investigate?: boolean;

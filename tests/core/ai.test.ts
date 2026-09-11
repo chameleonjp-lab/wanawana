@@ -141,15 +141,19 @@ describe('deterministic CPU cognition', () => {
 
   it('schedules an affordable trap and keeps the target cell valid', () => {
     const base = createWorld(2030);
-    const world: WorldState = { ...base, tick: 45 };
+    const world: WorldState = {
+      ...base,
+      tick: 45,
+      players: [base.players[0], { ...base.players[1], x: cellCenterUnits(5), y: cellCenterUnits(6) }],
+    };
     const decision = chooseCpuDecision(world);
     expect(decision.reason).toBe('placing');
     expect(decision.command.placeTrap).toBe('bounce');
-    expect(decision.command.trapCellX).toBeDefined();
-    expect(decision.command.trapCellY).toBeDefined();
+    expect(decision.command.trapCellX).toBeUndefined();
+    expect(decision.command.trapCellY).toBeUndefined();
 
     const next = advanceWorld(world, {}, decision.command);
-    expect(next.players[1].placement?.kind).toBe('bounce');
+    expect(next.players[1].placement).toMatchObject({ kind: 'bounce', cellX: 5, cellY: 6 });
     expect(next.traps).toHaveLength(0);
   });
 
@@ -165,10 +169,13 @@ describe('deterministic CPU cognition', () => {
     };
     const decision = chooseCpuDecision(world, 'hard');
     expect(decision.reason).toBe('placing');
-    const cell = `${decision.command.trapCellX}:${decision.command.trapCellY}`;
     const map = getMapDefinition('crossroads');
-    expect(map.obstacleCells.some((obstacle) => `${obstacle.cellX}:${obstacle.cellY}` === cell)).toBe(false);
-    expect(advanceWorld(world, {}, decision.command).players[1].placement?.kind).toBe('bounce');
+    const next = advanceWorld(world, {}, decision.command);
+    expect(decision.command.trapCellX).toBeUndefined();
+    expect(decision.command.trapCellY).toBeUndefined();
+    expect(next.players[1].placement?.kind).toBe('bounce');
+    expect(map.obstacleCells.some((obstacle) => obstacle.cellX === next.players[1].placement?.cellX
+      && obstacle.cellY === next.players[1].placement?.cellY)).toBe(false);
   });
 
   it('avoids revealed enemy traps but does not read hidden trap coordinates', () => {
@@ -182,21 +189,22 @@ describe('deterministic CPU cognition', () => {
       ],
     };
     const first = chooseCpuDecision(world, 'hard');
-    const cellX = first.command.trapCellX as number;
-    const cellY = first.command.trapCellY as number;
-    const trap: TrapState = enemyTrap({ cellX, cellY });
+    expect(first.command.trapCellX).toBeUndefined();
+    expect(first.command.trapCellY).toBeUndefined();
+    const trap: TrapState = enemyTrap({ cellX: 8, cellY: 6 });
     const revealed = chooseCpuDecision({
       ...world,
       traps: [{ ...trap, discoveredBy: [true, true] }],
     }, 'hard');
-    expect(`${revealed.command.trapCellX}:${revealed.command.trapCellY}`).not.toBe(`${cellX}:${cellY}`);
+    expect(revealed.command.trapCellX).toBeUndefined();
+    expect(revealed.command.trapCellY).toBeUndefined();
+    expect(revealed.command).not.toEqual(first.command);
 
     const hidden = chooseCpuDecision({
       ...world,
       traps: [{ ...trap, discoveredBy: [true, false] }],
     }, 'hard');
-    expect(hidden.command.trapCellX).toBe(cellX);
-    expect(hidden.command.trapCellY).toBe(cellY);
+    expect(hidden.command).toEqual(first.command);
   });
 
   it('fires on a fixed cadence when no higher-priority action is active', () => {
@@ -229,18 +237,30 @@ describe('deterministic CPU cognition', () => {
 
   it('limits easy planning and lets hard plan the terminal trap role', () => {
     const base = createWorld(2033);
-    const intermediate: WorldState = { ...base, tick: 225 };
+    const intermediate: WorldState = {
+      ...base,
+      tick: 225,
+      players: [base.players[0], { ...base.players[1], x: cellCenterUnits(5), y: cellCenterUnits(6) }],
+    };
     expect(chooseCpuDecision(intermediate, 'easy').command.placeTrap).toBe('bounce');
     expect(chooseCpuDecision(intermediate, 'normal').command.placeTrap).toBe('shock');
 
-    const terminal: WorldState = { ...base, tick: 405 };
+    const terminal: WorldState = {
+      ...base,
+      tick: 405,
+      players: [base.players[0], { ...base.players[1], x: cellCenterUnits(5), y: cellCenterUnits(6) }],
+    };
     expect(chooseCpuDecision(terminal, 'normal').command.placeTrap).toBe('bounce');
     expect(chooseCpuDecision(terminal, 'hard').command.placeTrap).toBe('hatch');
   });
 
   it('lets hard planning reach the delayed and field trap roles', () => {
     const base = createWorld(2034, ['bounce', 'shock', 'hatch'], ['bounce', 'bomb', 'moya']);
-    expect(chooseCpuDecision({ ...base, tick: 585 }, 'hard').command.placeTrap).toBe('bomb');
-    expect(chooseCpuDecision({ ...base, tick: 765 }, 'hard').command.placeTrap).toBe('moya');
+    const world: WorldState = {
+      ...base,
+      players: [base.players[0], { ...base.players[1], x: cellCenterUnits(5), y: cellCenterUnits(6) }],
+    };
+    expect(chooseCpuDecision({ ...world, tick: 585 }, 'hard').command.placeTrap).toBe('bomb');
+    expect(chooseCpuDecision({ ...world, tick: 765 }, 'hard').command.placeTrap).toBe('moya');
   });
 });

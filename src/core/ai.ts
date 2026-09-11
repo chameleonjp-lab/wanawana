@@ -2,6 +2,7 @@ import {
   DISARM_RADIUS_UNITS,
   INVESTIGATE_RADIUS_UNITS,
   MAX_ACTIVE_TRAPS,
+  SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS,
   TRAP_COSTS,
   cellCenterUnits,
   clampInteger,
@@ -208,22 +209,67 @@ function choosePlacement(
   const candidates = candidateCells(cpu, target);
   const ownTraps = world.traps.filter((trap) => trap.owner === 1);
   const revealedEnemyTraps = world.traps.filter((trap) => trap.owner === 0 && trap.discoveredBy[1]);
-  const obstacleCells = new Set(
-    getMapDefinition(world.mapId).obstacleCells.map((obstacle) => `${obstacle.cellX}:${obstacle.cellY}`),
-  );
-  return candidates.find(({ cellX, cellY }) => {
+  const map = getMapDefinition(world.mapId);
+  const obstacleCells = new Set(map.obstacleCells.map((obstacle) => `${obstacle.cellX}:${obstacle.cellY}`));
+  const spawnCells = [map.playerSpawn, map.cpuSpawn] as const;
+  const spawnRadiusSquared = SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS * SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS;
+  const isLegal = (cellX: number, cellY: number): boolean => {
     if (obstacleCells.has(`${cellX}:${cellY}`)) return false;
+    if (spawnCells.some(([spawnX, spawnY]) => {
+      const dx = cellCenterUnits(cellX) - cellCenterUnits(spawnX);
+      const dy = cellCenterUnits(cellY) - cellCenterUnits(spawnY);
+      return dx * dx + dy * dy <= spawnRadiusSquared;
+    })) return false;
     if (ownTraps.some((trap) => trap.cellX === cellX && trap.cellY === cellY)) return false;
     if (revealedEnemyTraps.some((trap) => trap.cellX === cellX && trap.cellY === cellY)) return false;
     const overlapsTarget = Math.abs(target.x - cellCenterUnits(cellX)) <= CELL_UNITS / 2 + 3_072
       && Math.abs(target.y - cellCenterUnits(cellY)) <= CELL_UNITS / 2 + 3_072;
     return !overlapsTarget;
-  }) ?? null;
+  };
+  // Prefer a legal cell under the CPU. This is still a destination selected by
+  // the same candidate contract, but it avoids walking past a target while a
+  // scheduled placement window is open. If the current cell is occupied or
+  // unsafe, fall back to the deterministic target-adjacent search.
+  const currentCellX = snapToCell(cpu.x, ARENA_WIDTH_CELLS);
+  const currentCellY = snapToCell(cpu.y, ARENA_HEIGHT_CELLS);
+  if (isLegal(currentCellX, currentCellY)) {
+    return {
+      cellX: currentCellX,
+      cellY: currentCellY,
+      direction: directionTowardCpu(cpu, target),
+    };
+  }
+  return candidates.find(({ cellX, cellY }) => isLegal(cellX, cellY)) ?? null;
 }
 
-function shouldPlace(world: WorldState, kind: TrapKind): boolean {
+function sameCell(player: WorldState['players'][number], cellX: number, cellY: number): boolean {
+  return snapToCell(player.x, ARENA_WIDTH_CELLS) === cellX
+    && snapToCell(player.y, ARENA_HEIGHT_CELLS) === cellY;
+}
+
+function movementTowardCell(
+  player: WorldState['players'][number],
+  cellX: number,
+  cellY: number,
+): Pick<InputCommand, 'moveX' | 'moveY'> {
+  const targetX = cellCenterUnits(cellX);
+  const targetY = cellCenterUnits(cellY);
+  const dx = targetX - player.x;
+  const dy = targetY - player.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return { moveX: signAxis(dx), moveY: 0 };
+  return { moveX: 0, moveY: signAxis(dy) };
+}
+
+function shouldPlace(
+  world: WorldState,
+  kind: TrapKind,
+  placement: PlacementCandidate | null,
+): boolean {
   const cpu = world.players[1];
-  if (world.tick < 45 || (world.tick - 45) % 180 !== 0) return false;
+  if (world.tick < 45 || !placement) return false;
+  const scheduledOpportunity = (world.tick - 45) % 180 === 0;
+  const atDestination = sameCell(cpu, placement.cellX, placement.cellY);
+  if (!scheduledOpportunity && !atDestination) return false;
   if (cpu.placement || cpu.investigation || cpu.trapCooldownTicks > 0) return false;
   if (cpu.gear < TRAP_COSTS[kind]) return false;
   return world.traps.filter((trap) => trap.owner === 1).length < MAX_ACTIVE_TRAPS;
@@ -260,7 +306,7 @@ export function chooseCpuDecision(world: WorldState, difficulty: CpuDifficulty =
   const visible = visibleTraps(world);
   const visibleTrapIds = visible.map((trap) => trap.id);
 
-  if (cpu.disabledTicks > 0) {
+  if (cpu.disabledTicks > 0 || cpu.respawnInvulnerableTicks > 0) {
     return { command: command({}), reason: 'disabled', visibleTrapIds };
   }
   if (cpu.placement) {
@@ -306,20 +352,26 @@ export function chooseCpuDecision(world: WorldState, difficulty: CpuDifficulty =
   }
 
   const kind = chooseTrapKind(world, profile.chainPlanning);
-  if (shouldPlace(world, kind)) {
-    const placement = choosePlacement(world);
-    if (placement) {
+  const placement = choosePlacement(world);
+  if (shouldPlace(world, kind, placement)) {
+    if (placement && !sameCell(cpu, placement.cellX, placement.cellY)) {
+      // CPU movement is a first-class command. Once it reaches the selected
+      // cell, the next decision sends the same foot-placement request used by
+      // the human input path; no arbitrary remote cell is accepted by core.
       return {
-        command: command({
-          placeTrap: kind,
-          trapDirection: placement.direction,
-          trapCellX: placement.cellX,
-          trapCellY: placement.cellY,
-        }),
+        command: command(movementTowardCell(cpu, placement.cellX, placement.cellY)),
         reason: 'placing',
         visibleTrapIds,
       };
     }
+    return {
+      command: command({
+        placeTrap: kind,
+        trapDirection: placement?.direction ?? directionTowardCpu(cpu, target),
+      }),
+      reason: 'placing',
+      visibleTrapIds,
+    };
   }
 
   if (

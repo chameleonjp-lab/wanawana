@@ -54,6 +54,8 @@ export const MOYA_RADIUS_UNITS = Math.trunc(1.5 * CELL_UNITS);
 export const MOYA_EFFECT_TICKS = 210;
 export const MOYA_SLOWED_SPEED_UNITS_PER_TICK = Math.trunc(PLAYER_SPEED_UNITS_PER_TICK * 0.7);
 export const RESPAWN_INVULNERABLE_TICKS = 30;
+/** New traps may not be placed within 1.5 cells of either spawn point. */
+export const SPAWN_PLACEMENT_EXCLUSION_RADIUS_UNITS = Math.trunc(1.5 * CELL_UNITS);
 export const MAX_CHAIN_TRAPS = 8;
 export const MAX_EVENTS_PER_TICK = 128;
 export const MAX_EVENT_LOG = 50_000;
@@ -548,8 +550,12 @@ export function normalizeCommand(command: Partial<InputCommand>): InputCommand {
     fire: command.fire === true,
     placeTrap: command.placeTrap,
     trapDirection: normalizeDirection(command.trapDirection),
-    trapCellX: Number.isInteger(command.trapCellX) ? command.trapCellX : undefined,
-    trapCellY: Number.isInteger(command.trapCellY) ? command.trapCellY : undefined,
+    // Keep malformed cell proofs present so the core can reject them. Replay
+    // serialization performs its own clamping after this boundary; silently
+    // dropping both values here would turn an invalid remote request into a
+    // valid foot-placement command.
+    trapCellX: command.trapCellX,
+    trapCellY: command.trapCellY,
     investigate: command.investigate === true,
     investigateStart: command.investigateStart === true,
   };

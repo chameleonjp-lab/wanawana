@@ -8,6 +8,7 @@ import {
 import { advanceWorld, createWorld } from '../../src/core/sim.ts';
 import { BALANCE_CONFIG_HASH } from '../../src/core/balance.ts';
 import { hashWorld } from '../../src/core/hash.ts';
+import { cellCenterUnits } from '../../src/core/fixed.ts';
 
 function withRehashedWorld(
   saved: ReturnType<typeof createMatchResume>,
@@ -39,13 +40,17 @@ describe('interrupted match resume records', () => {
 
   it('accepts a state that already contains trap events and delayed fields', () => {
     let world = createWorld(4321);
+    world = {
+      ...world,
+      players: [{ ...world.players[0], x: cellCenterUnits(4), y: cellCenterUnits(6) }, world.players[1]],
+    };
     world = advanceWorld(world, {
       placeTrap: 'shock',
-      trapCellX: 5,
+      trapCellX: 4,
       trapCellY: 6,
     }, {});
     for (let tick = 0; tick < 100 && world.events.length === 0; tick += 1) {
-      world = advanceWorld(world, { moveX: 1 }, {});
+      world = advanceWorld(world, tick < 60 ? {} : { moveX: 1 }, {});
     }
     expect(world.events.length).toBeGreaterThan(0);
     const saved = createMatchResume(world, 'normal', 15_000);
@@ -75,9 +80,9 @@ describe('interrupted match resume records', () => {
     expect(readMatchResume(`${'x'.repeat(2_000_001)}`, 30_001)).toBeNull();
   });
 
-  it('rejects pre-audit physics snapshots before resuming their state', () => {
+  it('rejects pre-PR02 snapshots before resuming their state', () => {
     const saved = createMatchResume(createWorld(101), 'normal', 31_000);
-    const legacy = { ...saved, engineVersion: 'wanawana-resume-v4' };
+    const legacy = { ...saved, engineVersion: 'wanawana-resume-v5' };
 
     // Keep all state and hashes valid to isolate the physics-version boundary.
     expect(readMatchResume(JSON.stringify(legacy), 31_001)).toBeNull();
