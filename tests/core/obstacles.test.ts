@@ -78,7 +78,13 @@ describe('map obstacle collisions', () => {
   });
 
   it('rejects trap placement on a wall cell', () => {
-    const world = createWorld(904, ['bounce', 'bomb', 'shock'], ['bounce', 'bomb', 'shock']);
+    const base = createWorld(904, ['bounce', 'bomb', 'shock'], ['bounce', 'bomb', 'shock']);
+    const world: WorldState = {
+      ...base,
+      // Hand-authored state intentionally puts the actor on the wall so the
+      // test isolates the obstacle rule from the remote-cell guard.
+      players: [{ ...base.players[0], x: cellCenterUnits(4), y: cellCenterUnits(4) }, base.players[1]],
+    };
     const next = advanceWorld(world, {
       placeTrap: 'bomb',
       trapCellX: 4,

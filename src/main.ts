@@ -1182,7 +1182,11 @@ function drawWorld(): void {
     const deltaX = previous ? player.x - previous.x : 0;
     const deltaY = previous ? player.y - previous.y : 0;
     const moving = Boolean(previous && (Math.abs(deltaX) >= 1 || Math.abs(deltaY) >= 1));
-    const action: ActorAction = player.disabledTicks > 0
+    // The visual state follows the core's common protection contract: the
+    // short post-respawn lock is just as unable to act or receive effects as
+    // a hatch-disabled actor.
+    const protectedActor = player.disabledTicks > 0 || player.respawnInvulnerableTicks > 0;
+    const action: ActorAction = protectedActor
       ? 'disabled'
       : player.placement
         ? 'placing'
@@ -1205,7 +1209,7 @@ function drawWorld(): void {
       facing: facingFromDelta(deltaX, deltaY, player.id === 0 ? 'up' : 'down'),
       action,
       motionScale: actorMotionScale,
-      alpha: player.disabledTicks > 0 ? 0.35 : 1,
+      alpha: protectedActor ? 0.35 : 1,
     });
   }
 

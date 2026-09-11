@@ -71,9 +71,9 @@ describe('deterministic match records', () => {
     expect(recorder.finish(invalidWorld)).toBeNull();
   });
 
-  it('does not replay the pre-audit physics rules with the new collision engine', () => {
+  it('does not replay pre-PR02 commands with the new action contract', () => {
     const initial = createWorld(83);
-    const recorder = new ReplayRecorder(initial, { engineVersion: 'wanawana-sim-v4' });
+    const recorder = new ReplayRecorder(initial, { engineVersion: 'wanawana-sim-v5' });
     const world = advanceWorld(initial, { moveX: 1 });
     recorder.recordTick({ moveX: 1 }, {}, world);
     const legacy = recorder.finish(world);
